@@ -1,7 +1,7 @@
-use std::{error::Error, fmt::{Display, UpperHex}};
+use std::{slice::Iter, error::Error, fmt::{Display, Write, UpperHex}};
 use crate::value::Value;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ByteCodeError {
     byte: u8,
     message: String,
@@ -22,19 +22,29 @@ impl From<(&u8, &str)> for ByteCodeError {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum OpCode {
-    OpConstant = 0x00,
-    OpConstantLong = 0x01,
-    OpReturn = 0x02,
+    Constant = 0x00,
+    ConstantLong = 0x01,
+    Negate = 0x02,
+    Add = 0x03,
+    Subtract = 0x04,
+    Multipliy = 0x05,
+    Divide = 0x06,
+    Return = 0x07,
 }
 
 impl Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::OpConstant => write!(f, "OP_CONSTANT"),
-            Self::OpConstantLong => write!(f, "OP_CONSTANT_LONG"),
-            Self::OpReturn => write!(f, "OP_RETURN")
+            Self::Constant => write!(f, "OP_CONSTANT"),
+            Self::ConstantLong => write!(f, "OP_CONSTANT_LONG"),
+            Self::Negate => write!(f, "OP_NEGATE"),
+            Self::Add => write!(f, "OP_ADD"),
+            Self::Subtract => write!(f, "OP_SUBTRACT"),
+            Self::Multipliy => write!(f, "OP_MULTIPLY"),
+            Self::Divide => write!(f, "OP_DIVIDE"),
+            Self::Return => write!(f, "OP_RETURN")
         }
     }
 }
@@ -50,14 +60,20 @@ impl TryFrom<&u8> for OpCode {
 
     fn try_from(value: &u8) -> Result<Self, Self::Error> {
         match value {
-            0x00 => Ok(Self::OpConstant),
-            0x01 => Ok(Self::OpConstantLong),
-            0x02 => Ok(Self::OpReturn),
+            0x00 => Ok(Self::Constant),
+            0x01 => Ok(Self::ConstantLong),
+            0x02 => Ok(Self::Negate),
+            0x03 => Ok(Self::Add),
+            0x04 => Ok(Self::Subtract),
+            0x05 => Ok(Self::Multipliy),
+            0x06 => Ok(Self::Divide),
+            0x07 => Ok(Self::Return),
             _ => Err((value, "Unknown OpCode").into())
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
@@ -90,34 +106,53 @@ impl Chunk {
         self.code.extend_from_slice(&bytes);
         self.lines.push(line);
     }
+
+    pub fn get_code_iter(&self) -> Iter<'_, u8> {
+        self.code.iter()
+    }
+
+    pub fn get_constants(&self) -> &[Value] {
+        &self.constants
+    }
+
+    pub fn get_lines(&self) -> &[i32] {
+        &self.lines
+    }
 }
 
 impl Display for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut iter = self.code.iter().enumerate();
-        let mut count = 0;
-        while let Some((i, instruction)) = iter.next() {
-            // Write common header
+        let mut iter = self.code.iter();
+        let mut instruction_counter = 0;
+
+        while let Some(instruction) = iter.next() {
+            write!(f, "{:#06X} ", instruction_counter)?;
             let op_code: OpCode = instruction.try_into().unwrap();
-            write!(f, "{:#06X} {:04} {: <15}", i, self.lines[count], format!("{}", op_code))?;
 
-            // Write specific data
-            match op_code {
-                OpCode::OpConstant => {
-                    let location = *iter.next().unwrap().1;
-                    write!(f, "\t {:#04X} {}\n", location, self.constants[location as usize])?
-                },
-                OpCode::OpConstantLong => {
-                    let bytes = [*iter.next().unwrap().1, *iter.next().unwrap().1];
-                    let location = u16::from_le_bytes(bytes);
-                    write!(f, "\t {:#06X} {}\n", location, self.constants[location as usize])?
-                },
-                OpCode::OpReturn => write!(f, "\n")?,
-            }
-
-            count += 1;
+            let mut output = String::new();
+            write_instruction(&mut output, &mut iter, op_code, self.lines[instruction_counter], &self.constants)?;
+            write!(f, "{}", output)?;
+            instruction_counter += 1;
         }
 
         Ok(())
+    }
+}
+
+pub fn write_instruction(output: &mut String, iter: &mut Iter<'_, u8>, op_code: OpCode, line: i32, constants: &[Value]) -> std::fmt::Result {
+    // Write common header
+    write!(output, "{:04} {: <15}", line, format!("{}", op_code))?;
+
+    // Write specific data
+    match op_code {
+        OpCode::Constant => {
+            let location = *iter.next().unwrap();
+            writeln!(output, "\t {:#04X}   {}", location, constants[location as usize])
+        },
+        OpCode::ConstantLong => {
+            let location = u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()]);
+            writeln!(output, "\t {:#06X} {}", location, constants[location as usize])
+        },
+        _ => writeln!(output),
     }
 }
