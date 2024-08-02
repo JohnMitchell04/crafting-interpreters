@@ -1,12 +1,11 @@
 use std::{error::Error, fmt::Display};
-use crate::{chunk::{write_instruction, Chunk, OpCode}, value::Value};
+use crate::{chunk::{write_instruction, Chunk, OpCode}, compiler::Compiler, value::Value};
 
-// TODO: This can be rewritten to avoid the last pop and the push
 macro_rules! binary_op {
     ($stack:expr, $op:tt) => {
         let b = $stack.pop().unwrap();
-        let a = $stack.pop().unwrap();
-        $stack.push(a $op b);
+        let a = $stack.last_mut().unwrap();
+        *a = *a $op b;
     };
 }
 
@@ -43,7 +42,14 @@ impl VM {
         VM { chunk: Chunk::new(), options, stack: Vec::new() }
     }
 
-    pub fn interpret(&mut self, chunk: Chunk) -> Result<(), InterpretError> {
+    pub fn interpret(&mut self, source: String) -> Result<(), InterpretError> {
+        let mut chunk = Chunk::new();
+        let mut compiler = Compiler::new();
+
+        if !compiler.compile(source, &mut chunk) {
+            return Err(InterpretError::InterpretCompileError);
+        }
+        
         self.chunk = chunk;
         self.run()
     }
@@ -78,9 +84,8 @@ impl VM {
                     self.stack.push(value)
                 },
                 OpCode::Negate => {
-                    if let Value::Double(ref mut d) = self.stack.last_mut().unwrap() {
-                        *d = -*d;
-                    }
+                    let temp = self.stack.last_mut().unwrap();
+                    *temp = -*temp;
                 },
                 OpCode::Add => { binary_op!(self.stack, +); },
                 OpCode::Subtract => { binary_op!(self.stack, -); },

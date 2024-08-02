@@ -1,33 +1,50 @@
 mod chunk;
 mod value;
 mod vm;
+mod compiler;
+mod scanner;
 
-use chunk::{Chunk, OpCode};
-use value::Value;
-use vm::{VMOptions, VM};
+use std::{env, fs};
+use vm::{InterpretError, VMOptions, VM};
+
+fn repl(mut vm: VM) {
+    // TODO: Improve this repl at some point
+    loop {
+        print!("> ");
+        let mut input = String::new();
+        _ = std::io::stdin().read_line(&mut input).unwrap();
+        vm.interpret(input);
+    }
+}
+
+fn run_file(mut vm: VM, path: String) {
+    let input = fs::read_to_string(path.clone()).unwrap_or_else(|_| {
+        println!("Error opening file {}.", {path});
+        std::process::exit(74);
+    });
+
+    let result = vm.interpret(input);
+
+    match result {
+        Err(InterpretError::InterpretCompileError) => std::process::exit(65),
+        Err(InterpretError::InterpretRuntimeError) => std::process::exit(70),
+        Ok(_) => {},
+    }
+}
 
 fn main() {
     let options = VMOptions { debug_trace: true };
-    let mut vm = VM::new(options);
-    let mut chunk = Chunk::new();
+    let vm = VM::new(options);
+    let args: Vec<String> = env::args().collect();
 
-    let location = chunk.write_constant(Value::Double(1.2));
-    chunk.write_instruction(OpCode::Constant, 123);
-    chunk.write_constant_location(location as u8, 123);
+    if args.len() == 1 {
+        repl(vm);
+    } else if args.len() == 2 {
+        run_file(vm, args[2].clone());
+    } else {
+        println!("Usage: clox [path]");
+        std::process::exit(64);
+    }
 
-    let location = chunk.write_constant(Value::Double(3.4));
-    chunk.write_instruction(OpCode::Constant, 123);
-    chunk.write_constant_location(location as u8, 123);
-
-    chunk.write_instruction(OpCode::Add, 123);
-
-    let location = chunk.write_constant(Value::Double(5.6));
-    chunk.write_instruction(OpCode::Constant, 123);
-    chunk.write_constant_location(location as u8, 123);
-
-    chunk.write_instruction(OpCode::Divide, 123);
-    chunk.write_instruction(OpCode::Negate, 123);
-
-    chunk.write_instruction(OpCode::Return, 123);
-    _ = vm.interpret(chunk);
+    std::process::exit(0);
 }
