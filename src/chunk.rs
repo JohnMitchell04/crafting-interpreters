@@ -1,4 +1,4 @@
-use std::{slice::Iter, error::Error, fmt::{Display, Write, UpperHex}};
+use std::{error::Error, fmt::{Display, UpperHex, Write}, slice::Iter};
 use crate::value::Value;
 
 #[derive(Debug, Clone)]
@@ -25,14 +25,21 @@ impl From<(&u8, &str)> for ByteCodeError {
 #[derive(Debug, Copy, Clone)]
 /// All instruction OpCodes.
 pub enum OpCode {
-    Constant = 0x00,
-    ConstantLong = 0x01,
-    Negate = 0x02,
-    Add = 0x03,
-    Subtract = 0x04,
-    Multipliy = 0x05,
-    Divide = 0x06,
-    Return = 0x07,
+    Constant =      0x00,
+    ConstantLong =  0x01,
+    Nil =           0x02,
+    True =          0x03,
+    False =         0x04,
+    Equal =         0x05,
+    Greater =       0x06,
+    Less =          0x07,
+    Add =           0x08,
+    Subtract =      0x09,
+    Multipliy =     0x0A,
+    Divide =        0x0B,
+    Not =           0x0C,
+    Negate =        0x0D,
+    Return =        0x0E,
 }
 
 impl Display for OpCode {
@@ -40,11 +47,18 @@ impl Display for OpCode {
         match self {
             Self::Constant => write!(f, "OP_CONSTANT"),
             Self::ConstantLong => write!(f, "OP_CONSTANT_LONG"),
-            Self::Negate => write!(f, "OP_NEGATE"),
+            Self::Nil => write!(f, "OP_NIL"),
+            Self::True => write!(f, "OP_TRUE"),
+            Self::False => write!(f, "OP_FALSE"),
+            Self::Equal => write!(f, "OP_EQUAL"),
+            Self::Greater => write!(f, "OP_GREATER"),
+            Self::Less => write!(f, "OP_LESS"),
             Self::Add => write!(f, "OP_ADD"),
             Self::Subtract => write!(f, "OP_SUBTRACT"),
             Self::Multipliy => write!(f, "OP_MULTIPLY"),
             Self::Divide => write!(f, "OP_DIVIDE"),
+            Self::Not => write!(f, "OP_NOT"),
+            Self::Negate => write!(f, "OP_NEGATE"),
             Self::Return => write!(f, "OP_RETURN")
         }
     }
@@ -63,12 +77,19 @@ impl TryFrom<&u8> for OpCode {
         match value {
             0x00 => Ok(Self::Constant),
             0x01 => Ok(Self::ConstantLong),
-            0x02 => Ok(Self::Negate),
-            0x03 => Ok(Self::Add),
-            0x04 => Ok(Self::Subtract),
-            0x05 => Ok(Self::Multipliy),
-            0x06 => Ok(Self::Divide),
-            0x07 => Ok(Self::Return),
+            0x02 => Ok(Self::Nil),
+            0x03 => Ok(Self::True),
+            0x04 => Ok(Self::False),
+            0x05 => Ok(Self::Equal),
+            0x06 => Ok(Self::Greater),
+            0x07 => Ok(Self::Less),
+            0x08 => Ok(Self::Add),
+            0x09 => Ok(Self::Subtract),
+            0x0A => Ok(Self::Multipliy),
+            0x0B => Ok(Self::Divide),
+            0x0C => Ok(Self::Not),
+            0x0D => Ok(Self::Negate),
+            0x0E => Ok(Self::Return),
             _ => Err((value, "Unknown OpCode").into())
         }
     }

@@ -203,7 +203,7 @@ impl<'a> Scanner<'a> {
             }
         }
         
-        return self.make_token(TokenType::Number, &output)
+        self.make_token(TokenType::Number, &output)
     }
 
     fn identifier(&mut self, char: char) -> Token {

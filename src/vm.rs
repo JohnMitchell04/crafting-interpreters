@@ -2,10 +2,38 @@ use std::{error::Error, fmt::Display};
 use crate::{chunk::{write_instruction, Chunk, OpCode}, compiler::Compiler, value::Value};
 
 macro_rules! binary_op {
-    ($stack:expr, $op:tt) => {
-        let b = $stack.pop().unwrap();
-        let a = $stack.last_mut().unwrap();
-        *a = *a $op b;
+    ($line:expr, $stack:expr, $op:tt) => {
+        {
+            let b = $stack.pop().unwrap();
+            let a = $stack.last_mut().unwrap();
+            let temp = *a $op b;
+
+            match temp {
+                Ok(val) => *a = val,
+                Err(err) => runtime_error!($line, $stack; "{}", err),
+            }
+        }
+    };
+}
+
+macro_rules! binary_comp {
+    ($line:expr, $stack:expr, $op:tt) => {
+        {
+            let b = $stack.pop().unwrap();
+            let a = $stack.last_mut().unwrap();
+            *a = Value::Bool(*a $op b);
+        }
+    }
+}
+
+macro_rules! runtime_error {
+    ($line:expr, $stack:expr; $($arg:tt)+) => {
+        {
+            println!($($arg)*);
+            println!("[line {}] in script", $line);
+            $stack.clear();
+            return Err(InterpretError::InterpretRuntimeError);
+        }
     };
 }
 
@@ -54,9 +82,9 @@ impl VM {
         loop {
             // TODO: Improve error handling here
             let op_code: OpCode = ip.next().unwrap().try_into().unwrap();
-            counter += 1;
 
             if cfg!(debug_assertions) {
+                println!("DEBUG: Stack contents and current instruction:");
                 for value in self.stack.iter() {
                     println!("[ {} ]", value);
                 }
@@ -75,19 +103,41 @@ impl VM {
                     let value = constants[u16::from_le_bytes([*ip.next().unwrap(), *ip.next().unwrap()]) as usize];
                     self.stack.push(value)
                 },
+                OpCode::False => self.stack.push(Value::Bool(false)),
+                OpCode::Equal => binary_comp!(self.chunk.get_lines()[counter], self.stack, ==),
+                OpCode::Greater => binary_comp!(self.chunk.get_lines()[counter], self.stack, >),
+                OpCode::Less => binary_comp!(self.chunk.get_lines()[counter], self.stack, <),
+                OpCode::True => self.stack.push(Value::Bool(true)),
+                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::Add => binary_op!(self.chunk.get_lines()[counter], self.stack, +),
+                OpCode::Subtract => binary_op!(self.chunk.get_lines()[counter], self.stack, -),
+                OpCode::Multipliy => binary_op!(self.chunk.get_lines()[counter], self.stack, *),
+                OpCode::Divide => binary_op!(self.chunk.get_lines()[counter], self.stack, /),
+                OpCode::Not => {
+                    let val = match self.stack.pop().unwrap() {
+                        Value::Bool(b) => !b,
+                        Value::Nil => true,
+                        _ => false,
+                    };
+
+                    self.stack.push(Value::Bool(val));
+                }
                 OpCode::Negate => {
-                    let temp = self.stack.last_mut().unwrap();
-                    *temp = -*temp;
+                    let value = self.stack.last_mut().unwrap();
+                    let temp = -*value;
+
+                    match temp {
+                        Ok(val) => *value = val,
+                        Err(err) => runtime_error!(self.chunk.get_lines()[counter], self.stack; "{}", err)
+                    }
                 },
-                OpCode::Add => { binary_op!(self.stack, +); },
-                OpCode::Subtract => { binary_op!(self.stack, -); },
-                OpCode::Multipliy => { binary_op!(self.stack, *); },
-                OpCode::Divide => { binary_op!(self.stack, /); },
                 OpCode::Return => {
                     println!("{}", self.stack.pop().unwrap());
                     return Ok(())
                 },
             }
+
+            counter += 1;
         }
     }
 }
