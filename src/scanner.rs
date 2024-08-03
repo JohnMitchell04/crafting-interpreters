@@ -1,6 +1,7 @@
 use std::{fmt::Display, iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// All token types.
 pub enum TokenType {
     // Single-character tokens.
     LeftParen, RightParen,
@@ -70,6 +71,7 @@ impl Display for TokenType {
 }
 
 #[derive(Debug, Clone)]
+/// A struct representing a token. It contains the type, the data held by the token and the line the token was generated on.
 pub struct Token {
     pub token_type: TokenType,
     pub data: String,
@@ -82,13 +84,19 @@ impl Display for Token {
     }
 }
 
+impl Token {
+    pub fn new() -> Self {
+        Token { token_type: TokenType::EOF, data: String::new(), line: 0 }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum TokenErrorType {
+pub enum ParseErrorType {
     UnexpectedToken,
     UnterminatedString
 }
 
-impl Display for TokenErrorType {
+impl Display for ParseErrorType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::UnexpectedToken => write!(f, "Unexpected character"),
@@ -97,30 +105,37 @@ impl Display for TokenErrorType {
     }
 }
 
-// TODO: Improve error handling
-#[derive(Debug, Clone)]
-pub struct TokenError {
+#[derive(Debug, Clone, Copy)]
+// TODO: Add more information to the parse error.
+pub struct ParseError {
     line: usize,
-    error_type: TokenErrorType,
+    error_type: ParseErrorType,
 }
 
-impl Display for TokenError {
+impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Error: {} at {}", self.error_type, self.line)
     }
 }
 
+#[derive(Debug)]
+/// A scanner object that iterates through the source code and outputs tokens.
 pub struct Scanner<'a> {
     line: usize,
     source: Peekable<Chars<'a>>,
 }
 
 impl<'a> Scanner<'a> {
+    /// Create a new scanner with the given source.
     pub fn new(source: Peekable<Chars<'a>>) -> Self {
         Scanner { line: 1, source }
     }
 
-    pub fn scan_token(&mut self) -> Result<Token, TokenError> {
+    /// Scan and produce the next token.
+    /// 
+    /// # Returns:
+    /// A [`Token`] if scanning was successful and a [`ParseError`] if there was an issue.
+    pub fn scan_token(&mut self) -> Result<Token, ParseError> {
         let cur_char = self.skip_whitespace();
 
         let token_type = match cur_char {
@@ -141,15 +156,15 @@ impl<'a> Scanner<'a> {
             Some('>') => if self.match_next('=') { self.make_token(TokenType::GreaterEqual, ">=") } else { self.make_token(TokenType::Greater, ">") },
             Some('"') => return self.string(),
             Some(c) if c.is_alphabetic() => self.identifier(c),
-            Some(c) if c.is_digit(10) => self.number(c),
-            Some(_) => return Err(self.make_error(TokenErrorType::UnexpectedToken)),
+            Some(c) if c.is_ascii_digit() => self.number(c),
+            Some(_) => return Err(self.make_error(ParseErrorType::UnexpectedToken)),
             None => return Ok(self.make_token(TokenType::EOF, "")),
         };
 
         Ok(token_type)
     }
 
-    fn string(&mut self) -> Result<Token, TokenError> {
+    fn string(&mut self) -> Result<Token, ParseError> {
         let mut output = String::from("\"");
 
         while let Some(char) = self.source.next() {
@@ -163,28 +178,31 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        Err(self.make_error(TokenErrorType::UnterminatedString))
+        Err(self.make_error(ParseErrorType::UnterminatedString))
     }
 
     fn number(&mut self, char: char) -> Token {
         let mut output = String::from(char);
-        while let Some(c) = self.source.next_if(|c| c.is_digit(10)) {
+        while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
             output.push(c);
         }
 
-        let mut two_look = self.source.clone();
-        if two_look.next() == Some('.') {
+        if self.source.peek() == Some(&'.') {
+            let mut two_look = self.source.clone();
+            _ = two_look.next();
             match two_look.peek() {
-                Some(c) if c.is_digit(10) => {},
-                _ => return self.make_token(TokenType::Number, &output)
+                Some(c) if c.is_ascii_digit() => {
+                    output.push(self.source.next().unwrap());
+                    while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
+                        output.push(c);
+                    }
+
+                    return self.make_token(TokenType::Number, &output)
+                },
+                _ => {}
             }
         }
-
-        output.push(self.source.next().unwrap());
-        while let Some(c) = self.source.next_if(|c| c.is_digit(10)) {
-            output.push(c);
-        }
-
+        
         return self.make_token(TokenType::Number, &output)
     }
 
@@ -234,7 +252,7 @@ impl<'a> Scanner<'a> {
                         return Some('/');
                     }
                 },
-                Some(c) => if c.is_whitespace() { self.source.next(); },
+                Some(c) if c.is_whitespace() => {},
                 c => return c,
             }
         }
@@ -244,7 +262,7 @@ impl<'a> Scanner<'a> {
         match self.source.peek() {
             Some(&c) if c == check => {
                 self.source.next();
-                return true
+                true
             }
             _ => false
         }
@@ -254,7 +272,7 @@ impl<'a> Scanner<'a> {
         Token { token_type, data: data.to_string(), line: self.line }
     }
 
-    fn make_error(&self, error_type: TokenErrorType) -> TokenError {
-        TokenError { line: self.line, error_type }
+    fn make_error(&self, error_type: ParseErrorType) -> ParseError {
+        ParseError { line: self.line, error_type }
     }
 }

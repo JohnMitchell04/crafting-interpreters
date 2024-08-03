@@ -23,6 +23,7 @@ impl From<(&u8, &str)> for ByteCodeError {
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
+/// All instruction OpCodes.
 pub enum OpCode {
     Constant = 0x00,
     ConstantLong = 0x01,
@@ -74,6 +75,7 @@ impl TryFrom<&u8> for OpCode {
 }
 
 #[derive(Debug, Clone)]
+/// A struct representing a block of code. The chunk contains the instruction [`OpCode`] bytes, the constants, and the lines of each instruction.
 pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
@@ -82,44 +84,71 @@ pub struct Chunk {
 }
 
 impl Chunk {
+    /// Create a new empty chunk.
     pub fn new() -> Self {
         Chunk { code: Vec::new(), constants: Vec::new(), lines: Vec::new() }
     }
 
-    pub fn write_instruction(&mut self, instruction: OpCode, line: i32) {
-        self.code.push(instruction as u8);
+    /// Write an instruction to the chunk's code.
+    /// 
+    /// # Arguments:
+    /// - `instruction` - The [`u8`] representation of the instruction.
+    /// - `line` - The [`i32`] index of the line in the chunk's lines.
+    pub fn write_instruction(&mut self, instruction: u8, line: i32) {
+        self.code.push(instruction);
         self.lines.push(line);
     }
 
+    /// Add a constant to the chunk's constants and returns the index.
+    /// 
+    /// # Arguments:
+    /// - `constant` - The [`Value`] to be added to the chunk's constants.
+    /// 
+    /// # Returns:
+    /// The [`usize`] index of the added constant.
     pub fn write_constant(&mut self, constant: Value) -> usize {
         self.constants.push(constant);
         self.constants.len() - 1
     }
 
+    /// Write the one byte location operand for a [`OpCode::Constant`].
+    /// 
+    /// # Arguments:
+    /// - `location` - The [`u8`] index of a constant in the chunk's constants.
+    /// - `line` - The [`i32`] index of the line in the chunk's lines.
     pub fn write_constant_location(&mut self, location: u8, line: i32) {
         self.code.push(location);
         self.lines.push(line);
     }
 
+    /// Write the two byte location operand for a [`OpCode::ConstantLong`].
+    /// 
+    /// # Arguments:
+    /// - `location` - The [`u16`] index of a constant in the chunk's constants.
+    /// - `line` - The [`i32`] index of the line in the chunk's lines.
     pub fn write_long_constant_location(&mut self, location: u16, line: i32) {
         let bytes = location.to_le_bytes();
         self.code.extend_from_slice(&bytes);
         self.lines.push(line);
     }
 
+    /// Retrieve an iter to the OpCodes
     pub fn get_code_iter(&self) -> Iter<'_, u8> {
         self.code.iter()
     }
 
+    /// Retrieve a slice of the chunk's constants.
     pub fn get_constants(&self) -> &[Value] {
         &self.constants
     }
 
+    /// Retrieve a slice of the chunk's lines.
     pub fn get_lines(&self) -> &[i32] {
         &self.lines
     }
 }
 
+/// Display each instruction in the chunk.
 impl Display for Chunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut iter = self.code.iter();
@@ -139,6 +168,7 @@ impl Display for Chunk {
     }
 }
 
+/// Write the instruction and it's information out in formatted way.
 pub fn write_instruction(output: &mut String, iter: &mut Iter<'_, u8>, op_code: OpCode, line: i32, constants: &[Value]) -> std::fmt::Result {
     // Write common header
     write!(output, "{:04} {: <15}", line, format!("{}", op_code))?;

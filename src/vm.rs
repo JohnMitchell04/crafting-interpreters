@@ -27,28 +27,20 @@ impl Display for InterpretError {
 
 impl Error for InterpretError {}
 
-pub struct VMOptions {
-    pub debug_trace: bool,
-}
-
 pub struct VM {
     chunk: Chunk,
-    options: VMOptions,
     stack: Vec<Value>
 }
 
 impl VM {
-    pub fn new(options: VMOptions) -> Self {
-        VM { chunk: Chunk::new(), options, stack: Vec::new() }
+    pub fn new() -> Self {
+        VM { chunk: Chunk::new(), stack: Vec::new() }
     }
 
     pub fn interpret(&mut self, source: String) -> Result<(), InterpretError> {
-        let mut chunk = Chunk::new();
-        let mut compiler = Compiler::new();
+        let mut compiler = Compiler::new(&source);
 
-        if !compiler.compile(source, &mut chunk) {
-            return Err(InterpretError::InterpretCompileError);
-        }
+        let chunk = compiler.compile().map_err(|_| InterpretError::InterpretCompileError)?;
         
         self.chunk = chunk;
         self.run()
@@ -64,7 +56,7 @@ impl VM {
             let op_code: OpCode = ip.next().unwrap().try_into().unwrap();
             counter += 1;
 
-            if self.options.debug_trace {
+            if cfg!(debug_assertions) {
                 for value in self.stack.iter() {
                     println!("[ {} ]", value);
                 }
