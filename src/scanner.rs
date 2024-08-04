@@ -128,7 +128,7 @@ pub struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     /// Create a new scanner with the given source.
     pub fn new(source: Peekable<Chars<'a>>) -> Self {
-        Scanner { line: 1, source }
+        Scanner { line: 0, source }
     }
 
     /// Scan and produce the next token.

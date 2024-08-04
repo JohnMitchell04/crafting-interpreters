@@ -30,16 +30,21 @@ pub enum OpCode {
     Nil =           0x02,
     True =          0x03,
     False =         0x04,
-    Equal =         0x05,
-    Greater =       0x06,
-    Less =          0x07,
-    Add =           0x08,
-    Subtract =      0x09,
-    Multipliy =     0x0A,
-    Divide =        0x0B,
-    Not =           0x0C,
-    Negate =        0x0D,
-    Return =        0x0E,
+    Pop =           0x05,
+    GetGlobal =     0x06,
+    DefineGlobal =  0x07,
+    SetGlobal =     0x08,
+    Equal =         0x09,
+    Greater =       0x0A,
+    Less =          0x0B,
+    Add =           0x0C,
+    Subtract =      0x0D,
+    Multipliy =     0x0E,
+    Divide =        0x0F,
+    Not =           0x10,
+    Negate =        0x11,
+    Print =         0x12,
+    Return =        0x13,
 }
 
 impl Display for OpCode {
@@ -50,6 +55,10 @@ impl Display for OpCode {
             Self::Nil => write!(f, "OP_NIL"),
             Self::True => write!(f, "OP_TRUE"),
             Self::False => write!(f, "OP_FALSE"),
+            Self::Pop => write!(f, "OP_POP"),
+            Self::GetGlobal => write!(f, "OP_GET_GLOBAL"),
+            Self::DefineGlobal => write!(f, "OP_DEFINE_GLOBAL"),
+            Self::SetGlobal => write!(f, "OP_SET_GLOBAL"),
             Self::Equal => write!(f, "OP_EQUAL"),
             Self::Greater => write!(f, "OP_GREATER"),
             Self::Less => write!(f, "OP_LESS"),
@@ -59,6 +68,7 @@ impl Display for OpCode {
             Self::Divide => write!(f, "OP_DIVIDE"),
             Self::Not => write!(f, "OP_NOT"),
             Self::Negate => write!(f, "OP_NEGATE"),
+            Self::Print => write!(f, "OP_PRINT"),
             Self::Return => write!(f, "OP_RETURN")
         }
     }
@@ -80,16 +90,21 @@ impl TryFrom<&u8> for OpCode {
             0x02 => Ok(Self::Nil),
             0x03 => Ok(Self::True),
             0x04 => Ok(Self::False),
-            0x05 => Ok(Self::Equal),
-            0x06 => Ok(Self::Greater),
-            0x07 => Ok(Self::Less),
-            0x08 => Ok(Self::Add),
-            0x09 => Ok(Self::Subtract),
-            0x0A => Ok(Self::Multipliy),
-            0x0B => Ok(Self::Divide),
-            0x0C => Ok(Self::Not),
-            0x0D => Ok(Self::Negate),
-            0x0E => Ok(Self::Return),
+            0x05 => Ok(Self::Pop),
+            0x06 => Ok(Self::GetGlobal),
+            0x07 => Ok(Self::DefineGlobal),
+            0x08 => Ok(Self::SetGlobal),
+            0x09 => Ok(Self::Equal),
+            0x0A => Ok(Self::Greater),
+            0x0B => Ok(Self::Less),
+            0x0C => Ok(Self::Add),
+            0x0D => Ok(Self::Subtract),
+            0x0E => Ok(Self::Multipliy),
+            0x0F => Ok(Self::Divide),
+            0x10 => Ok(Self::Not),
+            0x11 => Ok(Self::Negate),
+            0x12 => Ok(Self::Print),
+            0x13 => Ok(Self::Return),
             _ => Err((value, "Unknown OpCode").into())
         }
     }
@@ -167,6 +182,10 @@ impl Chunk {
     pub fn get_lines(&self) -> &[i32] {
         &self.lines
     }
+
+    pub fn clear_code(&mut self) {
+        self.code.clear()
+    }
 }
 
 /// Display each instruction in the chunk.
@@ -180,7 +199,7 @@ impl Display for Chunk {
             let op_code: OpCode = instruction.try_into().unwrap();
 
             let mut output = String::new();
-            write_instruction(&mut output, &mut iter, op_code, self.lines[instruction_counter], &self.constants)?;
+            output_instruction(&mut output, &mut iter, op_code, self.lines[instruction_counter], &self.constants)?;
             write!(f, "{}", output)?;
             instruction_counter += 1;
         }
@@ -190,7 +209,7 @@ impl Display for Chunk {
 }
 
 /// Write the instruction and it's information out in formatted way.
-pub fn write_instruction(output: &mut String, iter: &mut Iter<'_, u8>, op_code: OpCode, line: i32, constants: &[Value]) -> std::fmt::Result {
+pub fn output_instruction(output: &mut String, iter: &mut dyn Iterator<Item = &u8>, op_code: OpCode, line: i32, constants: &[Value]) -> std::fmt::Result {
     // Write common header
     write!(output, "{:04} {: <15}", line, format!("{}", op_code))?;
 

@@ -17,7 +17,8 @@ macro_rules! trace {
     ($($arg:tt)+) => {
         #[cfg(debug_assertions)]
         {
-            println!($($arg)*)
+            print!("TRACE: ");
+            println!($($arg)*);
         }
     };
 }
@@ -59,7 +60,7 @@ impl From<&u8> for Precedence {
     }
 }
 
-type CompileFn<'b> = fn(&mut Compiler<'b>);
+type CompileFn<'b> = fn(&mut Compiler<'b>, bool);
 
 #[derive(Debug, Clone, Copy)]
 /// A struct representing a parse rule. The rule contains two optional function pointers to the prefix and infix rules, and the precedence.
@@ -124,7 +125,7 @@ fn get_rule<'a>(token_type: TokenType) -> ParseRule<'a> {
         ParseRule { prefix: None, infix: Some(Compiler::binary), precedence: Precedence::Comparison }, // TOKEN_GREATER_EQUAL
         ParseRule { prefix: None, infix: Some(Compiler::binary), precedence: Precedence::Comparison }, // TOKEN_LESS
         ParseRule { prefix: None, infix: Some(Compiler::binary), precedence: Precedence::Comparison }, // TOKEN_LESS_EQUAL
-        ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_IDENTIFIER
+        ParseRule { prefix: Some(Compiler::variable), infix: None, precedence: Precedence::None }, // TOKEN_IDENTIFIER
         ParseRule { prefix: Some(Compiler::string), infix: None, precedence: Precedence::None }, // TOKEN_STRING
         ParseRule { prefix: Some(Compiler::number), infix: None, precedence: Precedence::None }, // TOKEN_NUMBER
         ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_AND
@@ -157,23 +158,24 @@ pub struct Compiler<'a> {
     scanner: Scanner<'a>,
     had_error: bool,
     panic_mode: bool,
-    chunk: Chunk,
+    chunk: &'a mut Chunk,
 }
 
+// TODO: String copies can likely be changed for mem::take() as we don't care about keeping the data in the tokens
+// Just be careful cause sometimes we access a previous token, we just need to ensure we don't access its data
 impl<'a> Compiler<'a> {
     /// Create a new compiler for the source code.
-    pub fn new(source: &'a str) -> Self {
+    pub fn new(chunk: &'a mut Chunk, source: &'a str) -> Self {
         let scanner = Scanner::new(source.chars().peekable());
-        Compiler { current: Token::new(), previous: Token::new(), scanner, had_error: false, panic_mode: false, chunk: Chunk::new() }
+        Compiler { current: Token::new(), previous: Token::new(), scanner, had_error: false, panic_mode: false, chunk }
     }
 
     // TOOD: Maybe change back to the book version and have the chunk be passed as a mutable reference
-    pub fn compile(&mut self) -> Result<Chunk, CompileError> {
+    pub fn compile(&mut self) -> Result<(), CompileError> {
         self.advance();
-        self.expression();
-        self.consume(TokenType::EOF, "Expect end of expression");
-
-        emit_bytes!(OpCode::Return; self.previous.line, self.chunk);
+        while !self.match_token(TokenType::EOF) {
+            self.declaration();
+        }
 
         if cfg!(debug_assertions) && !self.had_error {
             println!("DEBUG: Chunk contents:");
@@ -183,7 +185,7 @@ impl<'a> Compiler<'a> {
         if self.had_error {
             Err(CompileError::ParseError)
         } else {
-            Ok(self.chunk.clone())
+            Ok(())
         }
     }
 
@@ -217,6 +219,12 @@ impl<'a> Compiler<'a> {
         }
 
         self.error(true, message)
+    }
+
+    fn match_token(&mut self, token_type:TokenType) -> bool {
+        if self.current.token_type != token_type { return false }
+        self.advance();
+        true
     }
 
     /// Prints an error and sets the flags in the compiler.
@@ -256,12 +264,34 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn synchronise(&mut self) {
+        self.panic_mode = false;
+
+        while self.current.token_type != TokenType::EOF {
+            if self.previous.token_type == TokenType::Semicolon { return }
+            match self.current.token_type {
+                TokenType::Class => return,
+                TokenType::Fun => return,
+                TokenType::Var => return,
+                TokenType::For => return,
+                TokenType::If => return,
+                TokenType::While => return,
+                TokenType::Print => return,
+                TokenType::Return => return,
+                _ => {},
+            }
+
+            self.advance()
+        }
+    }
+
     fn parse_precendence(&mut self, precedence: Precedence) {
-        trace!{"TRACE: Parsing precedence: {}", precedence};
+        trace!{"Parsing precedence: {}", precedence};
         self.advance();
         let prefix_rule = get_rule(self.previous.token_type).prefix;
+        let can_assign = precedence <= Precedence::Assignment;
         if let Some(prefix_fn) = prefix_rule {
-            prefix_fn(self);
+            prefix_fn(self, can_assign);
         } else {
             self.error(false, "Expect expression");
             return;
@@ -271,30 +301,105 @@ impl<'a> Compiler<'a> {
         while precedence <= get_rule(self.current.token_type).precedence {
             self.advance();
             let infix_rule = get_rule(self.previous.token_type).infix.unwrap();
-            infix_rule(self)
+            infix_rule(self, can_assign)
+        }
+
+        if can_assign && self.match_token(TokenType::Equal) { self.error(true, "Invalid assignment target") }
+    }
+
+    fn parse_variable(&mut self) {
+        self.consume(TokenType::Identifier, "Expect variable name");
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())))
+    }
+
+    fn declaration(&mut self) {
+        trace!("Called declaration rule");
+        if self.match_token(TokenType::Var) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
+
+        if self.panic_mode { self.synchronise() }
+    }
+
+    fn var_declaration(&mut self) {
+        trace!("Called var declaration rule");
+        self.parse_variable();
+
+        if self.match_token(TokenType::Equal) {
+            self.expression()
+        } else {
+            emit_bytes!(OpCode::Nil; self.previous.line, self.chunk)
+        }
+
+        self.consume(TokenType::Semicolon, "Expect ';' after bariable");
+        self.define_variable();
+
+    }
+
+    fn define_variable(&mut self) {
+        emit_bytes!(OpCode::DefineGlobal; self.previous.line, self.chunk)
+    }
+
+    fn variable(&mut self, can_assign: bool) {
+        self.named_variable(can_assign)
+    }
+
+    fn named_variable(&mut self, can_assign: bool) {
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
+
+        if can_assign && self.match_token(TokenType::Equal) {
+            self.expression();
+            emit_bytes!(OpCode::SetGlobal; self.previous.line, self.chunk)
+        } else {
+            emit_bytes!(OpCode::GetGlobal; self.previous.line, self.chunk)
+        }
+    }
+
+    fn statement(&mut self) {
+        trace!("Called statement rule");
+        if self.match_token(TokenType::Print) {
+            self.print_statement()
+        } else {
+            self.expression_statement()
         }
     }
 
     fn expression(&mut self) {
-        trace!("TRACE: Called expression rule");
-        self.parse_precendence(Precedence::Assignment);
+        trace!("Called expression rule");
+        self.parse_precendence(Precedence::Assignment)
     }
 
-    fn number(&mut self) {
+    fn expression_statement(&mut self) {
+        trace!("Called expression statement rule");
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value");
+        emit_bytes!(OpCode::Pop; self.previous.line, self.chunk)
+    }
+
+    fn print_statement(&mut self) {
+        trace!("Called print statement");
+        self.expression();
+        self.consume(TokenType::Semicolon, "Expect ';' after value");
+        emit_bytes!(OpCode::Print; self.previous.line, self.chunk)
+    }
+
+    fn number(&mut self, _: bool) {
         let value = Value::Double(self.previous.data.parse().unwrap());
-        trace!("TRACE: Called number rule: {}", value);
+        trace!("Called number rule: {}", value);
         self.emit_constant(value);
     }
 
-    fn grouping(&mut self) {
-        trace!("TRACE: Called grouping rule");
+    fn grouping(&mut self, _: bool) {
+        trace!("Called grouping rule");
         self.expression();
-        self.consume(TokenType::RightParen, "Expect ')' after expression.");
+        self.consume(TokenType::RightParen, "Expect ')' after expression.")
     }
 
-    fn unary(&mut self) {
+    fn unary(&mut self, _: bool) {
         let operator_type = self.previous.token_type;
-        trace!("TRACE: Called unary rule: {}", operator_type);
+        trace!("Called unary rule: {}", operator_type);
 
         self.parse_precendence(Precedence::Unary);
 
@@ -305,12 +410,12 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn binary(&mut self) {
+    fn binary(&mut self, _: bool) {
         let operator_type = self.previous.token_type;
         let rule = get_rule(operator_type);
         let prec = (&(rule.precedence as u8 + 1)).into();
 
-        trace!("TRACE: Called binary rule: {}, with precedence: {}", operator_type, prec);
+        trace!("Called binary rule: {}, with precedence: {}", operator_type, prec);
 
         self.parse_precendence(prec);
 
@@ -329,8 +434,8 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn literal(&mut self) {
-        trace!("TRACE: Called literal rule: {}", self.previous.token_type);
+    fn literal(&mut self, _: bool) {
+        trace!("Called literal rule: {}", self.previous.token_type);
         match self.previous.token_type {
             TokenType::False => emit_bytes!(OpCode::False; self.previous.line, self.chunk),
             TokenType::True => emit_bytes!(OpCode::True; self.previous.line, self.chunk),
@@ -339,7 +444,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn string(&mut self) {
-        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())))
+    fn string(&mut self, _: bool) {
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
     }
 }

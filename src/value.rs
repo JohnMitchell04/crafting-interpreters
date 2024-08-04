@@ -13,17 +13,21 @@ impl Display for Object {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Default, Debug, Clone, PartialEq, PartialOrd)]
 pub enum Value {
     Double(f64),
     Bool(bool),
     Obj(Object),
+    #[default]
     Nil,
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::Nil
+impl Value {
+    pub fn get_string(&self) -> Result<String, &'static str> {
+        match self {
+            Self::Obj(Object::String(s)) => Ok(s.clone()),
+            _ => Err("Value must be a string"),
+        }
     }
 }
 
@@ -83,13 +87,15 @@ impl Div for Value {
     }
 }
 
+
+
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Double(d) => write!(f, "Type: DOUBLE, Value: {}", d),
-            Self::Bool(b) => write!(f, "Type: BOOL, Value: {}", b),
-            Self::Obj(o) => write!(f, "Type: OBJECT, Value: {}", o),
-            Self::Nil => write!(f, "Type: NIL"),
+            Self::Double(d) => write!(f, "{}", d),
+            Self::Bool(b) => write!(f, "{}", b),
+            Self::Obj(o) => write!(f, "{}", o),
+            Self::Nil => write!(f, "NIL"),
         }
     }
 }
