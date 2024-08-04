@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, mem};
 use crate::{chunk::{write_instruction, Chunk, OpCode}, compiler::Compiler, value::Value};
 
 macro_rules! binary_op {
@@ -6,12 +6,11 @@ macro_rules! binary_op {
         {
             let b = $stack.pop().unwrap();
             let a = $stack.last_mut().unwrap();
-            let temp = *a $op b;
-
-            match temp {
-                Ok(val) => *a = val,
+            let temp = mem::take(a);
+            *a = match temp $op b {
+                Ok(val) => val,
                 Err(err) => runtime_error!($line, $stack; "{}", err),
-            }
+            };
         }
     };
 }
@@ -96,11 +95,11 @@ impl VM {
 
             match op_code {
                 OpCode::Constant => {
-                    let value = constants[*ip.next().unwrap() as usize];
+                    let value = constants[*ip.next().unwrap() as usize].clone();
                     self.stack.push(value)
                 },
                 OpCode::ConstantLong => {
-                    let value = constants[u16::from_le_bytes([*ip.next().unwrap(), *ip.next().unwrap()]) as usize];
+                    let value = constants[u16::from_le_bytes([*ip.next().unwrap(), *ip.next().unwrap()]) as usize].clone();
                     self.stack.push(value)
                 },
                 OpCode::False => self.stack.push(Value::Bool(false)),
@@ -124,10 +123,10 @@ impl VM {
                 }
                 OpCode::Negate => {
                     let value = self.stack.last_mut().unwrap();
-                    let temp = -*value;
+                    let temp = mem::take(value);
 
-                    match temp {
-                        Ok(val) => *value = val,
+                    *value = match -temp {
+                        Ok(val) => val,
                         Err(err) => runtime_error!(self.chunk.get_lines()[counter], self.stack; "{}", err)
                     }
                 },

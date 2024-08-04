@@ -165,15 +165,12 @@ impl<'a> Scanner<'a> {
     }
 
     fn string(&mut self) -> Result<Token, ParseError> {
-        let mut output = String::from("\"");
+        let mut output = String::new();
 
         while let Some(char) = self.source.next() {
             match char {
                 '\n' => self.line += 1,
-                '"' => {
-                    output.push(char);
-                    return Ok(self.make_token(TokenType::String, &output));
-                },
+                '"' => return Ok(self.make_token(TokenType::String, &output)),
                 _ => output.push(char),
             }
         }

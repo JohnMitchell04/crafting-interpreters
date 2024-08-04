@@ -1,5 +1,5 @@
 use std::{error::Error, fmt::Display};
-use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenType}, value::Value};
+use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenType}, value::{Object, Value}};
 
 /// Write a number of bytes to the chunk's code.
 macro_rules! emit_bytes {
@@ -125,7 +125,7 @@ fn get_rule<'a>(token_type: TokenType) -> ParseRule<'a> {
         ParseRule { prefix: None, infix: Some(Compiler::binary), precedence: Precedence::Comparison }, // TOKEN_LESS
         ParseRule { prefix: None, infix: Some(Compiler::binary), precedence: Precedence::Comparison }, // TOKEN_LESS_EQUAL
         ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_IDENTIFIER
-        ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_STRING
+        ParseRule { prefix: Some(Compiler::string), infix: None, precedence: Precedence::None }, // TOKEN_STRING
         ParseRule { prefix: Some(Compiler::number), infix: None, precedence: Precedence::None }, // TOKEN_NUMBER
         ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_AND
         ParseRule { prefix: None, infix: None, precedence: Precedence::None }, // TOKEN_CLASS
@@ -237,7 +237,7 @@ impl<'a> Compiler<'a> {
             print!( "at '{}'", token.data);
         }
 
-        print!(" {}", message);
+        println!(" {}", message);
         self.had_error = true;
         self.panic_mode = true;
     }
@@ -253,7 +253,6 @@ impl<'a> Compiler<'a> {
         } else {
             emit_bytes!(OpCode::ConstantLong; self.previous.line, self.chunk);
             self.chunk.write_long_constant_location(location as u16, self.previous.line as i32);
-
         }
     }
 
@@ -338,5 +337,9 @@ impl<'a> Compiler<'a> {
             TokenType::Nil => emit_bytes!(OpCode::Nil; self.previous.line, self.chunk),
             _ => {},
         }
+    }
+
+    fn string(&mut self) {
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())))
     }
 }

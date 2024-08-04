@@ -14,6 +14,12 @@ fn repl(mut vm: VM) {
         io::stdout().flush().unwrap();
         let mut input = String::new();
         _ = std::io::stdin().read_line(&mut input).unwrap();
+
+        if input.trim() == "exit" {
+            println!("Exiting REPL");
+            return
+        }
+
         _ = vm.interpret(input);
     }
 }
