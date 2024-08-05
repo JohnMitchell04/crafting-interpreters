@@ -153,6 +153,14 @@ impl VM {
                         None => runtime_error!(lines[self.instruction_counter], self.stack; "Undefined variable: \"{}\"", global),
                     }
                 },
+                OpCode::GetLocal => {
+                    let slot = ip.next().unwrap();
+                    self.stack.push(self.stack[*slot as usize].clone());
+                },
+                OpCode::SetLocal => {
+                    let slot = ip.next().unwrap();
+                    self.stack[*slot as usize] = self.stack.last().unwrap().clone()
+                },
                 OpCode::Equal => binary_comp!(lines[self.counter], self.stack, ==),
                 OpCode::Greater => binary_comp!(lines[self.counter], self.stack, >),
                 OpCode::Less => binary_comp!(lines[self.counter], self.stack, <),

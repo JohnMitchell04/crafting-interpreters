@@ -46,7 +46,7 @@ fn main() {
     if args.len() == 1 {
         repl(vm);
     } else if args.len() == 2 {
-        run_file(vm, args[2].clone());
+        run_file(vm, args[1].clone());
     } else {
         println!("Usage: clox [path]");
         std::process::exit(64);

@@ -34,17 +34,19 @@ pub enum OpCode {
     GetGlobal =     0x06,
     DefineGlobal =  0x07,
     SetGlobal =     0x08,
-    Equal =         0x09,
-    Greater =       0x0A,
-    Less =          0x0B,
-    Add =           0x0C,
-    Subtract =      0x0D,
-    Multipliy =     0x0E,
-    Divide =        0x0F,
-    Not =           0x10,
-    Negate =        0x11,
-    Print =         0x12,
-    Return =        0x13,
+    GetLocal =      0x09,
+    SetLocal =      0x0A,
+    Equal =         0x0B,
+    Greater =       0x0C,
+    Less =          0x0D,
+    Add =           0x0E,
+    Subtract =      0x0F,
+    Multipliy =     0x10,
+    Divide =        0x11,
+    Not =           0x12,
+    Negate =        0x13,
+    Print =         0x14,
+    Return =        0x15,
 }
 
 impl Display for OpCode {
@@ -59,6 +61,8 @@ impl Display for OpCode {
             Self::GetGlobal => write!(f, "OP_GET_GLOBAL"),
             Self::DefineGlobal => write!(f, "OP_DEFINE_GLOBAL"),
             Self::SetGlobal => write!(f, "OP_SET_GLOBAL"),
+            Self::GetLocal => write!(f, "OP_GET_LOCAL"),
+            Self::SetLocal => write!(f, "OP_SET_LOCAL"),
             Self::Equal => write!(f, "OP_EQUAL"),
             Self::Greater => write!(f, "OP_GREATER"),
             Self::Less => write!(f, "OP_LESS"),
@@ -94,17 +98,19 @@ impl TryFrom<&u8> for OpCode {
             0x06 => Ok(Self::GetGlobal),
             0x07 => Ok(Self::DefineGlobal),
             0x08 => Ok(Self::SetGlobal),
-            0x09 => Ok(Self::Equal),
-            0x0A => Ok(Self::Greater),
-            0x0B => Ok(Self::Less),
-            0x0C => Ok(Self::Add),
-            0x0D => Ok(Self::Subtract),
-            0x0E => Ok(Self::Multipliy),
-            0x0F => Ok(Self::Divide),
-            0x10 => Ok(Self::Not),
-            0x11 => Ok(Self::Negate),
-            0x12 => Ok(Self::Print),
-            0x13 => Ok(Self::Return),
+            0x09 => Ok(Self::GetLocal),
+            0x0A => Ok(Self::SetLocal),
+            0x0B => Ok(Self::Equal),
+            0x0C => Ok(Self::Greater),
+            0x0D => Ok(Self::Less),
+            0x0E => Ok(Self::Add),
+            0x0F => Ok(Self::Subtract),
+            0x10 => Ok(Self::Multipliy),
+            0x11 => Ok(Self::Divide),
+            0x12 => Ok(Self::Not),
+            0x13 => Ok(Self::Negate),
+            0x14 => Ok(Self::Print),
+            0x15 => Ok(Self::Return),
             _ => Err((value, "Unknown OpCode").into())
         }
     }
@@ -222,6 +228,14 @@ pub fn output_instruction(output: &mut String, iter: &mut dyn Iterator<Item = &u
         OpCode::ConstantLong => {
             let location = u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()]);
             writeln!(output, "\t {:#06X} {}", location, constants[location as usize])
+        },
+        OpCode::GetLocal => {
+            let slot = *iter.next().unwrap();
+            writeln!(output, "\t {:#04X}", slot)
+        },
+        OpCode::SetLocal => {
+            let slot = *iter.next().unwrap();
+            writeln!(output, "\t {:#04X}", slot)
         },
         _ => writeln!(output),
     }

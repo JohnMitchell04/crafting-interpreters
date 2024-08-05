@@ -1,12 +1,15 @@
 use std::{error::Error, fmt::Display};
 use crate::{chunk::{Chunk, OpCode}, scanner::{Scanner, Token, TokenType}, value::{Object, Value}};
 
+// TODO: This 255 business for dealing with the local arguments is bad, come up with a better solution
 /// Write a number of bytes to the chunk's code.
 macro_rules! emit_bytes {
     ($($arg:expr),+; $line:expr, $chunk:expr) => {
         {
             $(
-                $chunk.write_instruction($arg as u8, $line as i32);
+                if $arg as u8 != 255 {
+                    $chunk.write_instruction($arg as u8, $line as i32);
+                }
             )+
         }
     };
@@ -151,6 +154,12 @@ fn get_rule<'a>(token_type: TokenType) -> ParseRule<'a> {
     rules[token_type as usize]
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Local {
+    name: Token,
+    depth: i16,
+}
+
 /// A compiler object that costructs a chunk by reading tokens from the input.
 pub struct Compiler<'a> {
     current: Token,
@@ -159,15 +168,18 @@ pub struct Compiler<'a> {
     had_error: bool,
     panic_mode: bool,
     chunk: &'a mut Chunk,
+    locals: Vec<Local>,
+    scope_depth: i16,
 }
 
 // TODO: String copies can likely be changed for mem::take() as we don't care about keeping the data in the tokens
 // Just be careful cause sometimes we access a previous token, we just need to ensure we don't access its data
+// Any interaction with a previous can definitely be based on taking instead of cloning
 impl<'a> Compiler<'a> {
     /// Create a new compiler for the source code.
     pub fn new(chunk: &'a mut Chunk, source: &'a str) -> Self {
         let scanner = Scanner::new(source.chars().peekable());
-        Compiler { current: Token::new(), previous: Token::new(), scanner, had_error: false, panic_mode: false, chunk }
+        Compiler { current: Token::new(), previous: Token::new(), scanner, had_error: false, panic_mode: false, chunk, locals: Vec::new(), scope_depth: 0 }
     }
 
     // TOOD: Maybe change back to the book version and have the chunk be passed as a mutable reference
@@ -285,6 +297,16 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn end_scope(&mut self) {
+        trace!("Ending local scope");
+        self.scope_depth -= 1;
+
+        while !self.locals.is_empty() && self.locals.last().unwrap().depth > self.scope_depth {
+            emit_bytes!(OpCode::Pop; self.previous.line, self.chunk);
+            self.locals.pop();
+        }
+    }
+
     fn parse_precendence(&mut self, precedence: Precedence) {
         trace!{"Parsing precedence: {}", precedence};
         self.advance();
@@ -308,7 +330,12 @@ impl<'a> Compiler<'a> {
     }
 
     fn parse_variable(&mut self) {
+        trace!("Valled parse variable rule");
         self.consume(TokenType::Identifier, "Expect variable name");
+
+        self.declare_variable();
+        if self.scope_depth > 0 { return }
+
         self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())))
     }
 
@@ -323,6 +350,32 @@ impl<'a> Compiler<'a> {
         if self.panic_mode { self.synchronise() }
     }
 
+    fn declare_variable(&mut self) {
+        if self.scope_depth == 0 { return }
+        trace!("Called declar variable rule");
+
+        let name = self.previous.clone();
+
+        let mut duplicate = false;
+        for local in self.locals.iter().rev() {
+            if local.depth != -1 && local.depth < self.scope_depth { break }
+
+            if local.name == name { duplicate = true }
+        }
+
+        if duplicate { self.error(false, "Already a variable with this name in this scope") }
+        self.add_local(name);
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.locals.len() as u8 == u8::MAX {
+            self.error(false, "Too many variables in local scope")
+        }
+
+        trace!("Adding variable: {}", name);
+        self.locals.push(Local { name, depth: -1 })
+    }
+
     fn var_declaration(&mut self) {
         trace!("Called var declaration rule");
         self.parse_variable();
@@ -333,12 +386,19 @@ impl<'a> Compiler<'a> {
             emit_bytes!(OpCode::Nil; self.previous.line, self.chunk)
         }
 
-        self.consume(TokenType::Semicolon, "Expect ';' after bariable");
+        self.consume(TokenType::Semicolon, "Expect ';' after variable");
         self.define_variable();
-
     }
 
     fn define_variable(&mut self) {
+        trace!("Called define variable rule");
+        if self.scope_depth > 0 {
+            trace!("Variable in local scope");
+            self.locals.last_mut().unwrap().depth = self.scope_depth;
+            return
+        }
+
+        trace!("Variable in global scope");
         emit_bytes!(OpCode::DefineGlobal; self.previous.line, self.chunk)
     }
 
@@ -347,20 +407,47 @@ impl<'a> Compiler<'a> {
     }
 
     fn named_variable(&mut self, can_assign: bool) {
-        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
+        trace!("Called named variable rule");
+        let arg = self.resolve_local();
+        let (get_op, set_op);
+        if arg != -1 {
+            get_op = OpCode::GetLocal;
+            set_op = OpCode::SetLocal;
+        } else {
+            self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
+            get_op = OpCode::GetGlobal;
+            set_op = OpCode::SetGlobal;
+        }
 
         if can_assign && self.match_token(TokenType::Equal) {
             self.expression();
-            emit_bytes!(OpCode::SetGlobal; self.previous.line, self.chunk)
+            emit_bytes!(set_op, arg; self.previous.line, self.chunk)
         } else {
-            emit_bytes!(OpCode::GetGlobal; self.previous.line, self.chunk)
+            emit_bytes!(get_op, arg; self.previous.line, self.chunk)
         }
+    }
+
+    fn resolve_local(&mut self, ) -> i8 {
+        trace!("Caled resolve local");
+        for (index, local) in self.locals.iter().enumerate().rev() {
+            if local.name.data == self.previous.data {
+                if local.depth == -1 { self.error(false, "Can't read local variable in its own initializer") }
+                return index as i8
+            }
+        }
+
+        return -1
     }
 
     fn statement(&mut self) {
         trace!("Called statement rule");
         if self.match_token(TokenType::Print) {
             self.print_statement()
+        } else if self.match_token(TokenType::LeftBrace) {
+            trace!("Defining new scope");
+            self.scope_depth += 1;
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement()
         }
@@ -369,6 +456,15 @@ impl<'a> Compiler<'a> {
     fn expression(&mut self) {
         trace!("Called expression rule");
         self.parse_precendence(Precedence::Assignment)
+    }
+
+    fn block(&mut self) {
+        trace!("Called block rule");
+        while self.current.token_type != TokenType::RightBrace && self.current.token_type != TokenType::EOF {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block")
     }
 
     fn expression_statement(&mut self) {

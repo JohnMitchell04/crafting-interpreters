@@ -70,7 +70,7 @@ impl Display for TokenType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 /// A struct representing a token. It contains the type, the data held by the token and the line the token was generated on.
 pub struct Token {
     pub token_type: TokenType,
@@ -125,6 +125,7 @@ pub struct Scanner<'a> {
     source: Peekable<Chars<'a>>,
 }
 
+// TODO: The scanner and tokens should be changed to string slices to improve performance
 impl<'a> Scanner<'a> {
     /// Create a new scanner with the given source.
     pub fn new(source: Peekable<Chars<'a>>) -> Self {
@@ -237,7 +238,7 @@ impl<'a> Scanner<'a> {
         // Get the next character, if it is whitespace or a comment then skip it, otherwise return it
         loop {
             match self.source.next() {
-                Some('\n') => { self.line += 1; self.source.next(); },
+                Some('\n') => { self.line += 1 },
                 Some('/') => {
                     if let Some('/') = self.source.peek() {
                         while let Some(&c) = self.source.peek() {
