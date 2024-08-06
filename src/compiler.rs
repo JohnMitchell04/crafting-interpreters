@@ -176,7 +176,16 @@ impl<'a> Compiler<'a> {
     /// Create a new compiler for the source code.
     pub fn new(chunk: &'a mut Chunk, source: &'a str) -> Self {
         let scanner = Scanner::new(source);
-        Compiler { current: Token::new(source), previous: Token::new(source), scanner, had_error: false, panic_mode: false, chunk, locals: Vec::new(), scope_depth: 0 }
+        Compiler { 
+            current: Token::new(source),
+            previous: Token::new(source),
+            scanner,
+            had_error: false,
+            panic_mode: false,
+            chunk,
+            locals: Vec::new(),
+            scope_depth: 0
+        }
     }
 
     pub fn compile(&mut self) -> Result<(), CompileError> {
@@ -201,18 +210,14 @@ impl<'a> Compiler<'a> {
 
     /// Advance forward a token, retrieving the new one from the scanner.
     fn advance(&mut self) {
-        // TODO: Maybe use RC to avoid lots of copies
-        self.previous = self.current.clone();
+        self.previous = self.current;
 
         loop {
             let res = self.scanner.scan_token();
 
             if res.is_ok() {
-                if cfg!(debug_assertions) {
-                    println!("DEBUG: {}", res.clone().unwrap());
-                }
-
                 self.current = res.unwrap();
+                if cfg!(debug_assertions) { println!("DEBUG: {}", self.current) }
                 break;
             } else {
                 print!("{}", res.err().unwrap());
@@ -371,17 +376,15 @@ impl<'a> Compiler<'a> {
         if self.scope_depth == 0 { return }
         trace!("Called declar variable rule");
 
-        let name = self.previous.clone();
-
         let mut duplicate = false;
         for local in self.locals.iter().rev() {
             if local.depth != -1 && local.depth < self.scope_depth { break }
 
-            if local.name == name { duplicate = true }
+            if local.name == self.previous { duplicate = true }
         }
 
         if duplicate { self.error(false, "Already a variable with this name in this scope") }
-        self.add_local(name);
+        self.add_local(self.previous);
     }
 
     fn add_local(&mut self, name: Token<'a>) {

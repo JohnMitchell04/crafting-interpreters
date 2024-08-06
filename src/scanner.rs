@@ -70,7 +70,7 @@ impl Display for TokenType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 /// A struct representing a token. It contains the type, the data referenced by the token and the line the token was generated on.
 pub struct Token<'a> {
     pub token_type: TokenType,
