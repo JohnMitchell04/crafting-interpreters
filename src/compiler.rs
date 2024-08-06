@@ -208,6 +208,10 @@ impl<'a> Compiler<'a> {
             let res = self.scanner.scan_token();
 
             if res.is_ok() {
+                if cfg!(debug_assertions) {
+                    println!("DEBUG: {}", res.clone().unwrap());
+                }
+
                 self.current = res.unwrap();
                 break;
             } else {
@@ -385,7 +389,7 @@ impl<'a> Compiler<'a> {
             self.error(false, "Too many variables in local scope")
         }
 
-        trace!("Adding variable: {}", name);
+        trace!("Adding variable: \"{}\"", name.data);
         self.locals.push(Local { name, depth: -1 })
     }
 

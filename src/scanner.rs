@@ -71,7 +71,7 @@ impl Display for TokenType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// A struct representing a token. It contains the type, the data held by the token and the line the token was generated on.
+/// A struct representing a token. It contains the type, the data referenced by the token and the line the token was generated on.
 pub struct Token<'a> {
     pub token_type: TokenType,
     pub data: &'a str,
@@ -80,7 +80,7 @@ pub struct Token<'a> {
 
 impl<'a> Display for Token<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:04} {: <19} {}", self.line, self.token_type, self.data)
+        write!(f, "{:04} {:<19} \"{}\"", self.line, format!("{}", self.token_type), self.data)
     }
 }
 
@@ -106,15 +106,15 @@ impl Display for ParseErrorType {
 }
 
 #[derive(Debug, Clone, Copy)]
-// TODO: Add more information to the parse error.
 pub struct ParseError {
     line: usize,
+    col: usize,
     error_type: ParseErrorType,
 }
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error: {} at {}", self.error_type, self.line)
+        write!(f, "Error: {} on line {} at column {}", self.error_type, self.line, self.col)
     }
 }
 
@@ -122,6 +122,7 @@ impl Display for ParseError {
 /// A scanner object that iterates through the source code and outputs tokens.
 pub struct Scanner<'a> {
     line: usize,
+    col: usize,
     current: usize,
     source: &'a str,
     iter: Peekable<CharIndices<'a>>
@@ -130,7 +131,7 @@ pub struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     /// Create a new scanner with the given source.
     pub fn new(source: &'a str) -> Self {
-        Scanner { line: 1, current: 0, source, iter: source.char_indices().peekable() }
+        Scanner { line: 1, col: 0, current: 0, source, iter: source.char_indices().peekable() }
     }
 
     /// Scan and produce the next token.
@@ -139,6 +140,7 @@ impl<'a> Scanner<'a> {
     /// A [`Token`] if scanning was successful and a [`ParseError`] if there was an issue.
     pub fn scan_token(&mut self) -> Result<Token<'a>, ParseError> {
         let res = self.skip_whitespace();
+        self.col += 1;
 
         if res.is_none() {
             return Ok(self.make_token(TokenType::EOF, ""))
@@ -159,29 +161,29 @@ impl<'a> Scanner<'a> {
             (_, "/") => self.make_token(TokenType::Slash, res.1),
             (_, "*") => self.make_token(TokenType::Star, res.1),
             (index, "!") => {
-                if let Some(end) = self.match_next('=') {
-                    self.make_token(TokenType::BangEqual, &self.source[index..end])
+                if self.match_next('=') {
+                    self.make_token(TokenType::BangEqual, &self.source[index..self.current])
                 } else {
                     self.make_token(TokenType::Bang, res.1)
                 } 
             },
             (index, "=") => {
-                if let Some(end) = self.match_next('=') {
-                    self.make_token(TokenType::EqualEqual, &self.source[index..end])
+                if self.match_next('=') {
+                    self.make_token(TokenType::EqualEqual, &self.source[index..self.current])
                 } else {
                     self.make_token(TokenType::Equal, res.1)
                 } 
             },
             (index, "<") => {
-                if let Some(end) = self.match_next('=') {
-                    self.make_token(TokenType::LessEqual, &self.source[index..end])
+                if self.match_next('=') {
+                    self.make_token(TokenType::LessEqual, &self.source[index..self.current])
                 } else {
                     self.make_token(TokenType::Less, res.1)
                 } 
             },
             (index, ">") => {
-                if let Some(end) = self.match_next('=') {
-                    self.make_token(TokenType::GreaterEqual, &self.source[index..end])
+                if self.match_next('=') {
+                    self.make_token(TokenType::GreaterEqual, &self.source[index..self.current])
                 } else {
                     self.make_token(TokenType::Greater, res.1)
                 } 
@@ -195,36 +197,41 @@ impl<'a> Scanner<'a> {
         Ok(token_type)
     }
 
+    /// Create a string token.
     fn string(&mut self) -> Result<Token<'a>, ParseError> {
         let start = self.current;
         while let Some((index, char)) = self.iter.next() {
-            self.current = index;
             match char {
-                '\n' => self.line += 1,
+                '\n' => { 
+                    self.line += 1;
+                    self.col = 1
+                },
                 '"' => { 
                     self.current = self.next_index();
+                    self.col += 1;
                     return Ok(self.make_token(TokenType::String, &self.source[start..index]))
                 },
-                _ => {},
+                _ => { self.col += 1 },
             }
         }
 
         Err(self.make_error(ParseErrorType::UnterminatedString))
     }
 
+    /// Create a new number token, taking care of decimal points correctly.
     fn number(&mut self, start: usize) -> Token<'a> {
-        while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() {}
+        while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() { self.col += 1 }
 
         if let Some((_, '.')) = self.iter.peek() {
+            // Create a new iter to allow two characters of lookahead
             let mut two_look = self.iter.clone();
             _ = two_look.next();
+
             match two_look.peek() {
                 Some((_, c)) if c.is_ascii_digit() => {
                     _ = self.iter.next();
-                    while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() {}
-
-                    let end = self.next_index();
-                    return self.make_token(TokenType::Number, &self.source[start..end])
+                    self.col += 1;
+                    while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() { self.col += 1 }
                 },
                 _ => {}
             }
@@ -234,86 +241,104 @@ impl<'a> Scanner<'a> {
         self.make_token(TokenType::Number, &self.source[start..end])
     }
 
+    /// Creates a new identifier token, checking whether the identifier is a key word first.
     fn identifier(&mut self, start: usize) -> Token<'a> {
         while let Some((_, c)) = self.iter.peek() {
             if !c.is_alphanumeric() { break }
             self.iter.next();
+            self.col += 1;
         }
 
         let end = self.next_index();
+        let ident = &self.source[start..end];
 
         match &self.source[start..end] {
-            "and" => self.make_token(TokenType::And, &self.source[start..end]),
-            "class" => self.make_token(TokenType::Class, &self.source[start..end]),
-            "else" => self.make_token(TokenType::Else, &self.source[start..end]),
-            "if" => self.make_token(TokenType::If, &self.source[start..end]),
-            "nil" => self.make_token(TokenType::Nil, &self.source[start..end]),
-            "or" => self.make_token(TokenType::Or, &self.source[start..end]),
-            "print" => self.make_token(TokenType::Print, &self.source[start..end]),
-            "return" => self.make_token(TokenType::Return, &self.source[start..end]),
-            "super" => self.make_token(TokenType::Super, &self.source[start..end]),
-            "var" => self.make_token(TokenType::Var, &self.source[start..end]),
-            "while" => self.make_token(TokenType::While, &self.source[start..end]),
-            "false" => self.make_token(TokenType::False, &self.source[start..end]),
-            "for" => self.make_token(TokenType::For, &self.source[start..end]),
-            "fun" => self.make_token(TokenType::Fun, &self.source[start..end]),
-            "this" => self.make_token(TokenType::This, &self.source[start..end]),
-            "true" => self.make_token(TokenType::True, &self.source[start..end]),
-            _ => self.make_token(TokenType::Identifier, &self.source[start..end]),
+            "and" =>    self.make_token(TokenType::And,         ident),
+            "class" =>  self.make_token(TokenType::Class,       ident),
+            "else" =>   self.make_token(TokenType::Else,        ident),
+            "if" =>     self.make_token(TokenType::If,          ident),
+            "nil" =>    self.make_token(TokenType::Nil,         ident),
+            "or" =>     self.make_token(TokenType::Or,          ident),
+            "print" =>  self.make_token(TokenType::Print,       ident),
+            "return" => self.make_token(TokenType::Return,      ident),
+            "super" =>  self.make_token(TokenType::Super,       ident),
+            "var" =>    self.make_token(TokenType::Var,         ident),
+            "while" =>  self.make_token(TokenType::While,       ident),
+            "false" =>  self.make_token(TokenType::False,       ident),
+            "for" =>    self.make_token(TokenType::For,         ident),
+            "fun" =>    self.make_token(TokenType::Fun,         ident),
+            "this" =>   self.make_token(TokenType::This,        ident),
+            "true" =>   self.make_token(TokenType::True,        ident),
+            _ =>        self.make_token(TokenType::Identifier,  ident),
         }
     }
 
+    /// Find the end of the curent character in the source slice.
     fn next_index(&mut self) -> usize {
         self.iter.peek().map(|(index, _)| *index).unwrap_or(self.source.len())
     }
 
+    /// Create a string reference to the next character.
     fn next_str(&mut self, index: usize) -> &'a str {
         &self.source[index..self.next_index()]
     }
 
+    /// Get the next character, if it is whitespace or a comment then skip it, otherwise return it.
     fn skip_whitespace(&mut self) -> Option<(usize, &'a str)> {
-        // Get the next character, if it is whitespace or a comment then skip it, otherwise return it
-        loop {
-            match self.iter.next() {
-                Some((_, '\n')) => self.line += 1,
-                Some((index, '/')) => {
-                    if let Some((_, '/')) = self.iter.peek() {
-                        while let Some((_, c)) = self.iter.peek() {
-                            if *c != '\n' { break }
-                            self.iter.next();
-                        }
-                    } else { 
-                        self.current = self.next_index();
-                        return Some((index, self.next_str(index)))
-                    }
+        while let Some((index, c)) = self.iter.next() {
+            match c {
+                '\n' => {
+                    self.line += 1;
+                    self.col = 0
                 },
-                Some((_, c)) if c.is_whitespace() => {},
-                Some((index, _)) => {
+                '/' => if let Some((index, str)) = self.skip_comment(index) { return Some((index, str)) },
+                c if c.is_whitespace() => {},
+                _ => {
                     self.current = self.next_index();
                     return Some((index, self.next_str(index)))
-                },
-                None => return None,
+                }
             }
-        }
-    }
-
-    fn match_next(&mut self, check: char) -> Option<usize> {
-        if let Some((index, c)) = self.iter.peek() {
-            if *c == check {
-                self.iter.next();
-                return Some(self.next_index())
-            }
-            self.current = *index;
         }
 
         None
     }
 
+    /// Checks if this is genuinely a comment and if so skips it, otherwise it is just a forward slash.
+    fn skip_comment(&mut self, index: usize) -> Option<(usize, &'a str)> {
+        if let Some((_, '/')) = self.iter.peek() {
+            while let Some((_, c)) = self.iter.peek() {
+                if *c != '\n' { break }
+                self.iter.next();
+            }
+        } else { 
+            self.current = self.next_index();
+            return Some((index, self.next_str(index)))
+        }
+
+        None
+    }
+
+    /// If the next character macthes then advance and return it, otherwise return none.
+    fn match_next(&mut self, check: char) -> bool {
+        if let Some((_, c)) = self.iter.peek() {
+            if *c == check {
+                self.iter.next();
+                self.col += 1;
+                self.current = self.next_index();
+                return true
+            }
+        }
+
+        false
+    }
+
+    /// Create a new token with the given information.
     fn make_token(&self, token_type: TokenType, data: &'a str) -> Token<'a> {
         Token { token_type, data, line: self.line }
     }
 
+    /// Create a new parse error based on the state of the scanner.
     fn make_error(&self, error_type: ParseErrorType) -> ParseError {
-        ParseError { line: self.line, error_type }
+        ParseError { line: self.line, col: self.col, error_type }
     }
 }
