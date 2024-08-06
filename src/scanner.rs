@@ -1,4 +1,4 @@
-use std::{fmt::Display, iter::Peekable, str::Chars};
+use std::{fmt::Display, iter::Peekable, str::CharIndices};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// All token types.
@@ -72,21 +72,21 @@ impl Display for TokenType {
 
 #[derive(Debug, Clone, PartialEq)]
 /// A struct representing a token. It contains the type, the data held by the token and the line the token was generated on.
-pub struct Token {
+pub struct Token<'a> {
     pub token_type: TokenType,
-    pub data: String,
+    pub data: &'a str,
     pub line: usize,
 }
 
-impl Display for Token {
+impl<'a> Display for Token<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:04} {: <19} {}", self.line, self.token_type, self.data)
     }
 }
 
-impl Token {
-    pub fn new() -> Self {
-        Token { token_type: TokenType::EOF, data: String::new(), line: 0 }
+impl<'a> Token<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Token { token_type: TokenType::EOF, data: source, line: 0 }
     }
 }
 
@@ -122,152 +122,195 @@ impl Display for ParseError {
 /// A scanner object that iterates through the source code and outputs tokens.
 pub struct Scanner<'a> {
     line: usize,
-    source: Peekable<Chars<'a>>,
+    current: usize,
+    source: &'a str,
+    iter: Peekable<CharIndices<'a>>
 }
 
-// TODO: The scanner and tokens should be changed to string slices to improve performance
 impl<'a> Scanner<'a> {
     /// Create a new scanner with the given source.
-    pub fn new(source: Peekable<Chars<'a>>) -> Self {
-        Scanner { line: 0, source }
+    pub fn new(source: &'a str) -> Self {
+        Scanner { line: 1, current: 0, source, iter: source.char_indices().peekable() }
     }
 
     /// Scan and produce the next token.
     /// 
     /// # Returns:
     /// A [`Token`] if scanning was successful and a [`ParseError`] if there was an issue.
-    pub fn scan_token(&mut self) -> Result<Token, ParseError> {
-        let cur_char = self.skip_whitespace();
+    pub fn scan_token(&mut self) -> Result<Token<'a>, ParseError> {
+        let res = self.skip_whitespace();
 
-        let token_type = match cur_char {
-            Some('(') => self.make_token(TokenType::LeftParen, "("),
-            Some(')') => self.make_token(TokenType::RightParen, ")"),
-            Some('{') => self.make_token(TokenType::LeftBrace, "{"),
-            Some('}') => self.make_token(TokenType::RightBrace, "}"),
-            Some(';') => self.make_token(TokenType::Semicolon, ";"),
-            Some(',') => self.make_token(TokenType::Comma, ","),
-            Some('.') => self.make_token(TokenType::Dot, "."),
-            Some('-') => self.make_token(TokenType::Minus, "-"),
-            Some('+') => self.make_token(TokenType::Plus, "+"),
-            Some('/') => self.make_token(TokenType::Slash, "/"),
-            Some('*') => self.make_token(TokenType::Star, "*"),
-            Some('!') => if self.match_next('=') { self.make_token(TokenType::BangEqual, "!=") } else { self.make_token(TokenType::Bang, "!") },
-            Some('=') => if self.match_next('=') { self.make_token(TokenType::EqualEqual, "==") } else { self.make_token(TokenType::Equal, "=") },
-            Some('<') => if self.match_next('=') { self.make_token(TokenType::LessEqual, "<=") } else { self.make_token(TokenType::Less, "<") },
-            Some('>') => if self.match_next('=') { self.make_token(TokenType::GreaterEqual, ">=") } else { self.make_token(TokenType::Greater, ">") },
-            Some('"') => return self.string(),
-            Some(c) if c.is_alphabetic() => self.identifier(c),
-            Some(c) if c.is_ascii_digit() => self.number(c),
-            Some(_) => return Err(self.make_error(ParseErrorType::UnexpectedToken)),
-            None => return Ok(self.make_token(TokenType::EOF, "")),
+        if res.is_none() {
+            return Ok(self.make_token(TokenType::EOF, ""))
+        }
+
+        let res = res.unwrap();
+
+        let token_type = match res {
+            (_, "(") => self.make_token(TokenType::LeftParen, res.1),
+            (_, ")") => self.make_token(TokenType::RightParen, res.1),
+            (_, "{") => self.make_token(TokenType::LeftBrace, res.1),
+            (_, "}") => self.make_token(TokenType::RightBrace, res.1),
+            (_, ";") => self.make_token(TokenType::Semicolon, res.1),
+            (_, ",") => self.make_token(TokenType::Comma, res.1),
+            (_, ".") => self.make_token(TokenType::Dot, res.1),
+            (_, "-") => self.make_token(TokenType::Minus, res.1),
+            (_, "+") => self.make_token(TokenType::Plus, res.1),
+            (_, "/") => self.make_token(TokenType::Slash, res.1),
+            (_, "*") => self.make_token(TokenType::Star, res.1),
+            (index, "!") => {
+                if let Some(end) = self.match_next('=') {
+                    self.make_token(TokenType::BangEqual, &self.source[index..end])
+                } else {
+                    self.make_token(TokenType::Bang, res.1)
+                } 
+            },
+            (index, "=") => {
+                if let Some(end) = self.match_next('=') {
+                    self.make_token(TokenType::EqualEqual, &self.source[index..end])
+                } else {
+                    self.make_token(TokenType::Equal, res.1)
+                } 
+            },
+            (index, "<") => {
+                if let Some(end) = self.match_next('=') {
+                    self.make_token(TokenType::LessEqual, &self.source[index..end])
+                } else {
+                    self.make_token(TokenType::Less, res.1)
+                } 
+            },
+            (index, ">") => {
+                if let Some(end) = self.match_next('=') {
+                    self.make_token(TokenType::GreaterEqual, &self.source[index..end])
+                } else {
+                    self.make_token(TokenType::Greater, res.1)
+                } 
+            },
+            (_, "\"") => return self.string(),
+            (index, c) if c.chars().all(|c| c.is_alphabetic()) => self.identifier(index),
+            (index, c) if c.chars().all(|c| c.is_ascii_digit()) => self.number(index),
+            _ => return Err(self.make_error(ParseErrorType::UnexpectedToken)),
         };
 
         Ok(token_type)
     }
 
-    fn string(&mut self) -> Result<Token, ParseError> {
-        let mut output = String::new();
-
-        while let Some(char) = self.source.next() {
+    fn string(&mut self) -> Result<Token<'a>, ParseError> {
+        let start = self.current;
+        while let Some((index, char)) = self.iter.next() {
+            self.current = index;
             match char {
                 '\n' => self.line += 1,
-                '"' => return Ok(self.make_token(TokenType::String, &output)),
-                _ => output.push(char),
+                '"' => { 
+                    self.current = self.next_index();
+                    return Ok(self.make_token(TokenType::String, &self.source[start..index]))
+                },
+                _ => {},
             }
         }
 
         Err(self.make_error(ParseErrorType::UnterminatedString))
     }
 
-    fn number(&mut self, char: char) -> Token {
-        let mut output = String::from(char);
-        while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
-            output.push(c);
-        }
+    fn number(&mut self, start: usize) -> Token<'a> {
+        while let Some(_) = self.iter.next_if(|(_, c)| c.is_ascii_digit()) {}
 
-        if self.source.peek() == Some(&'.') {
-            let mut two_look = self.source.clone();
+        if let Some((_, '.')) = self.iter.peek() {
+            let mut two_look = self.iter.clone();
             _ = two_look.next();
             match two_look.peek() {
-                Some(c) if c.is_ascii_digit() => {
-                    output.push(self.source.next().unwrap());
-                    while let Some(c) = self.source.next_if(|c| c.is_ascii_digit()) {
-                        output.push(c);
-                    }
+                Some((_, c)) if c.is_ascii_digit() => {
+                    _ = self.iter.next();
+                    while let Some(_) = self.iter.next_if(|(_, c)| c.is_ascii_digit()) {}
 
-                    return self.make_token(TokenType::Number, &output)
+                    let end = self.next_index();
+                    return self.make_token(TokenType::Number, &self.source[start..end])
                 },
                 _ => {}
             }
         }
         
-        self.make_token(TokenType::Number, &output)
+        let end = self.next_index();
+        self.make_token(TokenType::Number, &self.source[start..end])
     }
 
-    fn identifier(&mut self, char: char) -> Token {
-        let mut output = String::from(char);
-        while let Some(c) = self.source.peek() {
+    fn identifier(&mut self, start: usize) -> Token<'a> {
+        while let Some((_, c)) = self.iter.peek() {
             if !c.is_alphanumeric() { break }
-
-            output.push(*c);
-            self.source.next();
+            self.iter.next();
         }
 
-        match output.as_str() {
-            "and" => self.make_token(TokenType::And, &output),
-            "class" => self.make_token(TokenType::Class, &output),
-            "else" => self.make_token(TokenType::Else, &output),
-            "if" => self.make_token(TokenType::If, &output),
-            "nil" => self.make_token(TokenType::Nil, &output),
-            "or" => self.make_token(TokenType::Or, &output),
-            "print" => self.make_token(TokenType::Print, &output),
-            "return" => self.make_token(TokenType::Return, &output),
-            "super" => self.make_token(TokenType::Super, &output),
-            "var" => self.make_token(TokenType::Var, &output),
-            "while" => self.make_token(TokenType::While, &output),
-            "false" => self.make_token(TokenType::False, &output),
-            "for" => self.make_token(TokenType::For, &output),
-            "fun" => self.make_token(TokenType::Fun, &output),
-            "this" => self.make_token(TokenType::This, &output),
-            "true" => self.make_token(TokenType::True, &output),
-            _ => self.make_token(TokenType::Identifier, &output)
+        let end = self.next_index();
+
+        match &self.source[start..end] {
+            "and" => self.make_token(TokenType::And, &self.source[start..end]),
+            "class" => self.make_token(TokenType::Class, &self.source[start..end]),
+            "else" => self.make_token(TokenType::Else, &self.source[start..end]),
+            "if" => self.make_token(TokenType::If, &self.source[start..end]),
+            "nil" => self.make_token(TokenType::Nil, &self.source[start..end]),
+            "or" => self.make_token(TokenType::Or, &self.source[start..end]),
+            "print" => self.make_token(TokenType::Print, &self.source[start..end]),
+            "return" => self.make_token(TokenType::Return, &self.source[start..end]),
+            "super" => self.make_token(TokenType::Super, &self.source[start..end]),
+            "var" => self.make_token(TokenType::Var, &self.source[start..end]),
+            "while" => self.make_token(TokenType::While, &self.source[start..end]),
+            "false" => self.make_token(TokenType::False, &self.source[start..end]),
+            "for" => self.make_token(TokenType::For, &self.source[start..end]),
+            "fun" => self.make_token(TokenType::Fun, &self.source[start..end]),
+            "this" => self.make_token(TokenType::This, &self.source[start..end]),
+            "true" => self.make_token(TokenType::True, &self.source[start..end]),
+            _ => self.make_token(TokenType::Identifier, &self.source[start..end]),
         }
     }
 
-    fn skip_whitespace(&mut self) -> Option<char> {
+    fn next_index(&mut self) -> usize {
+        self.iter.peek().map(|(index, _)| *index).unwrap_or(self.source.len())
+    }
+
+    fn next_str(&mut self, index: usize) -> &'a str {
+        &self.source[index..self.next_index()]
+    }
+
+    fn skip_whitespace(&mut self) -> Option<(usize, &'a str)> {
         // Get the next character, if it is whitespace or a comment then skip it, otherwise return it
         loop {
-            match self.source.next() {
-                Some('\n') => { self.line += 1 },
-                Some('/') => {
-                    if let Some('/') = self.source.peek() {
-                        while let Some(&c) = self.source.peek() {
-                            if c == '\n' { break }
-                            
-                            self.source.next();
+            match self.iter.next() {
+                Some((_, '\n')) => self.line += 1,
+                Some((index, '/')) => {
+                    if let Some((_, '/')) = self.iter.peek() {
+                        while let Some((_, c)) = self.iter.peek() {
+                            if *c != '\n' { break }
+                            self.iter.next();
                         }
-                    } else {
-                        return Some('/');
+                    } else { 
+                        self.current = self.next_index();
+                        return Some((index, self.next_str(index)))
                     }
                 },
-                Some(c) if c.is_whitespace() => {},
-                c => return c,
+                Some((_, c)) if c.is_whitespace() => {},
+                Some((index, _)) => {
+                    self.current = self.next_index();
+                    return Some((index, self.next_str(index)))
+                },
+                None => return None,
             }
         }
     }
 
-    fn match_next(&mut self, check: char) -> bool {
-        match self.source.peek() {
-            Some(&c) if c == check => {
-                self.source.next();
-                true
+    fn match_next(&mut self, check: char) -> Option<usize> {
+        if let Some((index, c)) = self.iter.peek() {
+            if *c == check {
+                self.iter.next();
+                return Some(self.next_index())
             }
-            _ => false
+            self.current = *index;
         }
+
+        None
     }
 
-    fn make_token(&mut self, token_type: TokenType, data: &str) -> Token {
-        Token { token_type, data: data.to_string(), line: self.line }
+    fn make_token(&self, token_type: TokenType, data: &'a str) -> Token<'a> {
+        Token { token_type, data: data, line: self.line }
     }
 
     fn make_error(&self, error_type: ParseErrorType) -> ParseError {

@@ -155,20 +155,20 @@ fn get_rule<'a>(token_type: TokenType) -> ParseRule<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct Local {
-    name: Token,
+struct Local<'a> {
+    name: Token<'a>,
     depth: i16,
 }
 
 /// A compiler object that costructs a chunk by reading tokens from the input.
 pub struct Compiler<'a> {
-    current: Token,
-    previous: Token,
+    current: Token<'a>,
+    previous: Token<'a>,
     scanner: Scanner<'a>,
     had_error: bool,
     panic_mode: bool,
     chunk: &'a mut Chunk,
-    locals: Vec<Local>,
+    locals: Vec<Local<'a>>,
     scope_depth: i16,
 }
 
@@ -178,11 +178,10 @@ pub struct Compiler<'a> {
 impl<'a> Compiler<'a> {
     /// Create a new compiler for the source code.
     pub fn new(chunk: &'a mut Chunk, source: &'a str) -> Self {
-        let scanner = Scanner::new(source.chars().peekable());
-        Compiler { current: Token::new(), previous: Token::new(), scanner, had_error: false, panic_mode: false, chunk, locals: Vec::new(), scope_depth: 0 }
+        let scanner = Scanner::new(source);
+        Compiler { current: Token::new(source), previous: Token::new(source), scanner, had_error: false, panic_mode: false, chunk, locals: Vec::new(), scope_depth: 0 }
     }
 
-    // TOOD: Maybe change back to the book version and have the chunk be passed as a mutable reference
     pub fn compile(&mut self) -> Result<(), CompileError> {
         self.advance();
         while !self.match_token(TokenType::EOF) {
@@ -190,8 +189,10 @@ impl<'a> Compiler<'a> {
         }
 
         if cfg!(debug_assertions) && !self.had_error {
+            println!("{}", "-".repeat(50));
             println!("DEBUG: Chunk contents:");
-            println!("{}", self.chunk);
+            print!("{}", self.chunk);
+            println!("{}", "-".repeat(50));
         }
         
         if self.had_error {
@@ -336,7 +337,7 @@ impl<'a> Compiler<'a> {
         self.declare_variable();
         if self.scope_depth > 0 { return }
 
-        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())))
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.to_string().clone())))
     }
 
     fn declaration(&mut self) {
@@ -367,7 +368,7 @@ impl<'a> Compiler<'a> {
         self.add_local(name);
     }
 
-    fn add_local(&mut self, name: Token) {
+    fn add_local(&mut self, name: Token<'a>) {
         if self.locals.len() as u8 == u8::MAX {
             self.error(false, "Too many variables in local scope")
         }
@@ -414,7 +415,7 @@ impl<'a> Compiler<'a> {
             get_op = OpCode::GetLocal;
             set_op = OpCode::SetLocal;
         } else {
-            self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
+            self.emit_constant(Value::Obj(Object::String(self.previous.data.to_string().clone())));
             get_op = OpCode::GetGlobal;
             set_op = OpCode::SetGlobal;
         }
@@ -541,6 +542,6 @@ impl<'a> Compiler<'a> {
     }
 
     fn string(&mut self, _: bool) {
-        self.emit_constant(Value::Obj(Object::String(self.previous.data.clone())));
+        self.emit_constant(Value::Obj(Object::String(self.previous.data.to_string().clone())));
     }
 }
