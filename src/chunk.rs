@@ -46,7 +46,10 @@ pub enum OpCode {
     Not =           0x12,
     Negate =        0x13,
     Print =         0x14,
-    Return =        0x15,
+    Jump =          0x15,
+    JumpIfFalse =   0x16,
+    Loop =          0x17,
+    Return =        0x18,
 }
 
 impl Display for OpCode {
@@ -73,6 +76,9 @@ impl Display for OpCode {
             Self::Not => write!(f, "OP_NOT"),
             Self::Negate => write!(f, "OP_NEGATE"),
             Self::Print => write!(f, "OP_PRINT"),
+            Self::Jump => write!(f, "OP_JUMP"),
+            Self::JumpIfFalse => write!(f, "OP_JUMP_IF_FALSE"),
+            Self::Loop => write!(f, "OP_LOOP"),
             Self::Return => write!(f, "OP_RETURN")
         }
     }
@@ -110,7 +116,10 @@ impl TryFrom<&u8> for OpCode {
             0x12 => Ok(Self::Not),
             0x13 => Ok(Self::Negate),
             0x14 => Ok(Self::Print),
-            0x15 => Ok(Self::Return),
+            0x15 => Ok(Self::Jump),
+            0x16 => Ok(Self::JumpIfFalse),
+            0x17 => Ok(Self::Loop),
+            0x18 => Ok(Self::Return),
             _ => Err((value, "Unknown OpCode").into())
         }
     }
@@ -174,7 +183,28 @@ impl Chunk {
         self.lines.push(line);
     }
 
-    /// Retrieve an iter to the OpCodes
+    /// Write the destination of a jump statement in the given offset position
+    /// 
+    /// # Arguments:
+    /// - `offset` - The [`usize`] offset to write the value to.
+    /// - `value` - The [`u16`] value to write. 
+    pub fn write_jump_dest(&mut self, offset: usize, value: u16) {
+        let bytes = value.to_le_bytes();
+        self.code[offset] = bytes[0];
+        self.code[offset + 1] = bytes[1]
+    }
+
+    /// Retrieve the length of instructions emitted so far.
+    pub fn get_code_count(&self) -> usize {
+        self.code.len()
+    }
+
+    /// Get a slice of the chunk's code.
+    pub fn get_code(&self) -> &[u8] {
+        &self.code
+    }
+
+    /// Retrieve an iter to the OpCodes.
     pub fn get_code_iter(&self) -> Iter<'_, u8> {
         self.code.iter()
     }
@@ -200,8 +230,10 @@ impl Display for Chunk {
         let mut iter = self.code.iter();
         let mut instruction_counter = 0;
 
+        writeln!(f, "Count  | Line | {:<16} | Operand | Value", format!("Op Code"))?;
+
         while let Some(instruction) = iter.next() {
-            write!(f, "{:#06X} ", instruction_counter)?;
+            write!(f, "{:#06X} | ", instruction_counter)?;
             let op_code: OpCode = instruction.try_into().unwrap();
 
             let mut output = String::new();
@@ -217,26 +249,29 @@ impl Display for Chunk {
 /// Write the instruction and it's information out in formatted way.
 pub fn output_instruction(output: &mut String, iter: &mut dyn Iterator<Item = &u8>, op_code: OpCode, line: i32, constants: &[Value]) -> std::fmt::Result {
     // Write common header
-    write!(output, "{:04} {: <15}", line, format!("{}", op_code))?;
+    write!(output, "{:04} | {:<16} |", line, format!("{}", op_code))?;
 
     // Write specific data
     match op_code {
         OpCode::Constant => {
             let location = *iter.next().unwrap();
-            writeln!(output, "\t {:#04X}   {}", location, constants[location as usize])
+            writeln!(output, " {:<8}| {}", format!("{:#04X}", location), constants[location as usize])
         },
         OpCode::ConstantLong => {
             let location = u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()]);
-            writeln!(output, "\t {:#06X} {}", location, constants[location as usize])
+            writeln!(output, " {:<8}| {}", format!("{:#06X}", location), constants[location as usize])
         },
         OpCode::GetLocal => {
             let slot = *iter.next().unwrap();
-            writeln!(output, "\t {:#04X}", slot)
+            writeln!(output, " {:<8}|", format!("{:#04X}", slot))
         },
         OpCode::SetLocal => {
             let slot = *iter.next().unwrap();
-            writeln!(output, "\t {:#04X}", slot)
+            writeln!(output, " {:<8}|", format!("{:#04X}", slot))
         },
-        _ => writeln!(output),
+        OpCode::Jump => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
+        OpCode::JumpIfFalse => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
+        OpCode::Loop => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
+        _ => writeln!(output, "{}|", " ".repeat(9)),
     }
 }

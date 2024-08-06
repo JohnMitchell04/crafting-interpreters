@@ -213,7 +213,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn number(&mut self, start: usize) -> Token<'a> {
-        while let Some(_) = self.iter.next_if(|(_, c)| c.is_ascii_digit()) {}
+        while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() {}
 
         if let Some((_, '.')) = self.iter.peek() {
             let mut two_look = self.iter.clone();
@@ -221,7 +221,7 @@ impl<'a> Scanner<'a> {
             match two_look.peek() {
                 Some((_, c)) if c.is_ascii_digit() => {
                     _ = self.iter.next();
-                    while let Some(_) = self.iter.next_if(|(_, c)| c.is_ascii_digit()) {}
+                    while self.iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() {}
 
                     let end = self.next_index();
                     return self.make_token(TokenType::Number, &self.source[start..end])
@@ -310,7 +310,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn make_token(&self, token_type: TokenType, data: &'a str) -> Token<'a> {
-        Token { token_type, data: data, line: self.line }
+        Token { token_type, data, line: self.line }
     }
 
     fn make_error(&self, error_type: ParseErrorType) -> ParseError {

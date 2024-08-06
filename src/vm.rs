@@ -36,6 +36,18 @@ macro_rules! runtime_error {
     };
 }
 
+macro_rules! is_falsey {
+    ($value:expr) => {
+        {
+            match $value {
+                Value::Bool(b) => !b,
+                Value::Nil => true,
+                _ => false,
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum InterpretError {
     InterpretCompileError,
@@ -58,12 +70,12 @@ pub struct VM {
     chunk: Chunk,
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
-    instruction_counter: usize,
+    operation_counter: usize,
 }
 
 impl VM {
     pub fn new() -> Self {
-        VM { chunk: Chunk::new(), stack: Vec::new(), globals: HashMap::new(), instruction_counter: 0 }
+        VM { chunk: Chunk::new(), stack: Vec::new(), globals: HashMap::new(), operation_counter: 0 }
     }
 
     pub fn interpret(&mut self, source: String) -> Result<(), InterpretError> {
@@ -81,16 +93,25 @@ impl VM {
         Ok(())
     }
 
+    fn next(&self, ip: &mut usize) -> Option<u8> {
+        if *ip >= self.chunk.get_code_count() {
+            None
+        } else {
+            *ip += 1;
+            Some(self.chunk.get_code()[*ip - 1])
+        }
+    }
+
     fn run(&mut self) -> Result<(), InterpretError> {
-        let mut ip = self.chunk.get_code_iter();
+        let mut ip = 0;
         let constants = self.chunk.get_constants();
         let lines = self.chunk.get_lines();
         
         loop {
-            let op_code = match ip.next() {
-                Some(code) => code.try_into().unwrap(),
+            let op_code = match &self.next(&mut ip) {
+                Some(val) => val,
                 None => return Ok(()),
-            };
+            }.try_into().unwrap();
 
             if cfg!(debug_assertions) {
                 let mut some = false;
@@ -113,18 +134,18 @@ impl VM {
 
                 println!("DEBUG: Current instruction: ");
                 let mut output = String::new();
-                output_instruction(&mut output, &mut ip.clone(), op_code, lines[self.instruction_counter], constants).unwrap();
+                output_instruction(&mut output, &mut self.chunk.get_code_iter().skip(ip), op_code, lines[self.operation_counter], constants).unwrap();
                 print!("{}", output);
                 println!("{}", "-".repeat(50));
             }
 
             match op_code {
                 OpCode::Constant => {
-                    let value = constants[*ip.next().unwrap() as usize].clone();
+                    let value = constants[self.next(&mut ip).unwrap() as usize].clone();
                     self.stack.push(value)
                 },
                 OpCode::ConstantLong => {
-                    let value = constants[u16::from_le_bytes([*ip.next().unwrap(), *ip.next().unwrap()]) as usize].clone();
+                    let value = constants[u16::from_le_bytes([self.next(&mut ip).unwrap(), self.next(&mut ip).unwrap()]) as usize].clone();
                     self.stack.push(value)
                 },
                 OpCode::False => self.stack.push(Value::Bool(false)),
@@ -134,7 +155,7 @@ impl VM {
                     let value = self.globals.get(&global);
                     match value {
                         Some(value) => self.stack.push(value.clone()),
-                        None => runtime_error!(lines[self.instruction_counter], self.stack; "Undefined variable: \"{}\"", global)
+                        None => runtime_error!(lines[self.operation_counter], self.stack; "Undefined variable: \"{}\"", global)
                     }
                 },
                 OpCode::DefineGlobal => {
@@ -150,49 +171,57 @@ impl VM {
                             self.globals.insert(global, value.clone());
                             self.stack.push(value);
                         },
-                        None => runtime_error!(lines[self.instruction_counter], self.stack; "Undefined variable: \"{}\"", global),
+                        None => runtime_error!(lines[self.operation_counter], self.stack; "Undefined variable: \"{}\"", global),
                     }
                 },
                 OpCode::GetLocal => {
-                    let slot = ip.next().unwrap();
-                    self.stack.push(self.stack[*slot as usize].clone());
+                    let slot = self.next(&mut ip).unwrap();
+                    self.stack.push(self.stack[slot as usize].clone());
                 },
                 OpCode::SetLocal => {
-                    let slot = ip.next().unwrap();
-                    self.stack[*slot as usize] = self.stack.last().unwrap().clone()
+                    let slot = self.next(&mut ip).unwrap();
+                    self.stack[slot as usize] = self.stack.last().unwrap().clone()
                 },
                 OpCode::Equal => binary_comp!(lines[self.counter], self.stack, ==),
                 OpCode::Greater => binary_comp!(lines[self.counter], self.stack, >),
                 OpCode::Less => binary_comp!(lines[self.counter], self.stack, <),
                 OpCode::True => self.stack.push(Value::Bool(true)),
                 OpCode::Nil => self.stack.push(Value::Nil),
-                OpCode::Add => binary_op!(lines[self.instruction_counter], self.stack, +),
-                OpCode::Subtract => binary_op!(lines[self.instruction_counter], self.stack, -),
-                OpCode::Multipliy => binary_op!(lines[self.instruction_counter], self.stack, *),
-                OpCode::Divide => binary_op!(lines[self.instruction_counter], self.stack, /),
+                OpCode::Add => binary_op!(lines[self.operation_counter], self.stack, +),
+                OpCode::Subtract => binary_op!(lines[self.operation_counter], self.stack, -),
+                OpCode::Multipliy => binary_op!(lines[self.operation_counter], self.stack, *),
+                OpCode::Divide => binary_op!(lines[self.operation_counter], self.stack, /),
                 OpCode::Not => {
-                    let val = match self.stack.pop().unwrap() {
-                        Value::Bool(b) => !b,
-                        Value::Nil => true,
-                        _ => false,
-                    };
-
-                    self.stack.push(Value::Bool(val));
-                }
+                    let val = is_falsey!(self.stack.pop().unwrap());
+                    self.stack.push(Value::Bool(val))
+                },
                 OpCode::Negate => {
                     let value = self.stack.last_mut().unwrap();
                     let temp = mem::take(value);
 
                     *value = match -temp {
                         Ok(val) => val,
-                        Err(err) => runtime_error!(lines[self.instruction_counter], self.stack; "{}", err)
+                        Err(err) => runtime_error!(lines[self.operation_counter], self.stack; "{}", err)
                     }
                 },
                 OpCode::Print => println!("{}", self.stack.pop().unwrap()),
+                OpCode::Jump => {
+                    let offset = u16::from_le_bytes([self.next(&mut ip).unwrap(), self.next(&mut ip).unwrap()]);
+                    ip += offset as usize;
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = u16::from_le_bytes([self.next(&mut ip).unwrap(), self.next(&mut ip).unwrap()]);
+                    if is_falsey!(self.stack.last().unwrap()) { ip += offset as usize}
+                },
+                OpCode::Loop => {
+                    let offset = u16::from_le_bytes([self.next(&mut ip).unwrap(), self.next(&mut ip).unwrap()]);
+                    ip -= offset as usize;
+                },
                 OpCode::Return => return Ok(()),
             }
 
-            self.instruction_counter += 1;
+            // TODO: Find some way to add line counts back
+            // self.operation_counter += 1;
         }
     }
 }
