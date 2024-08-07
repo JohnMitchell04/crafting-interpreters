@@ -1,25 +1,5 @@
-use std::{error::Error, fmt::{Display, UpperHex, Write}, slice::Iter};
+use std::{fmt::{Display, UpperHex, Write}, slice::Iter};
 use crate::value::Value;
-
-#[derive(Debug, Clone)]
-pub struct ByteCodeError {
-    byte: u8,
-    message: String,
-}
-
-impl Display for ByteCodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Invalid bytecode: {:#04x}, {}", self.byte, self.message)
-    }
-}
-
-impl Error for ByteCodeError {}
-
-impl From<(&u8, &str)> for ByteCodeError {
-    fn from((byte, message): (&u8, &str)) -> Self {
-        ByteCodeError { byte: *byte, message: message.to_string() }
-    }
-}
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
@@ -49,7 +29,8 @@ pub enum OpCode {
     Jump =          0x15,
     JumpIfFalse =   0x16,
     Loop =          0x17,
-    Return =        0x18,
+    Call =          0x18,
+    Return =        0x19,
 }
 
 impl Display for OpCode {
@@ -79,6 +60,7 @@ impl Display for OpCode {
             Self::Jump => write!(f, "OP_JUMP"),
             Self::JumpIfFalse => write!(f, "OP_JUMP_IF_FALSE"),
             Self::Loop => write!(f, "OP_LOOP"),
+            Self::Call => write!(f, "OP_CALL"),
             Self::Return => write!(f, "OP_RETURN")
         }
     }
@@ -90,47 +72,46 @@ impl UpperHex for OpCode {
     }
 }
 
-impl TryFrom<&u8> for OpCode {
-    type Error = ByteCodeError;
-
-    fn try_from(value: &u8) -> Result<Self, Self::Error> {
+impl From<&u8> for OpCode {
+    fn from(value: &u8) -> Self {
         match value {
-            0x00 => Ok(Self::Constant),
-            0x01 => Ok(Self::ConstantLong),
-            0x02 => Ok(Self::Nil),
-            0x03 => Ok(Self::True),
-            0x04 => Ok(Self::False),
-            0x05 => Ok(Self::Pop),
-            0x06 => Ok(Self::GetGlobal),
-            0x07 => Ok(Self::DefineGlobal),
-            0x08 => Ok(Self::SetGlobal),
-            0x09 => Ok(Self::GetLocal),
-            0x0A => Ok(Self::SetLocal),
-            0x0B => Ok(Self::Equal),
-            0x0C => Ok(Self::Greater),
-            0x0D => Ok(Self::Less),
-            0x0E => Ok(Self::Add),
-            0x0F => Ok(Self::Subtract),
-            0x10 => Ok(Self::Multipliy),
-            0x11 => Ok(Self::Divide),
-            0x12 => Ok(Self::Not),
-            0x13 => Ok(Self::Negate),
-            0x14 => Ok(Self::Print),
-            0x15 => Ok(Self::Jump),
-            0x16 => Ok(Self::JumpIfFalse),
-            0x17 => Ok(Self::Loop),
-            0x18 => Ok(Self::Return),
-            _ => Err((value, "Unknown OpCode").into())
+            0x00 => Self::Constant,
+            0x01 => Self::ConstantLong,
+            0x02 => Self::Nil,
+            0x03 => Self::True,
+            0x04 => Self::False,
+            0x05 => Self::Pop,
+            0x06 => Self::GetGlobal,
+            0x07 => Self::DefineGlobal,
+            0x08 => Self::SetGlobal,
+            0x09 => Self::GetLocal,
+            0x0A => Self::SetLocal,
+            0x0B => Self::Equal,
+            0x0C => Self::Greater,
+            0x0D => Self::Less,
+            0x0E => Self::Add,
+            0x0F => Self::Subtract,
+            0x10 => Self::Multipliy,
+            0x11 => Self::Divide,
+            0x12 => Self::Not,
+            0x13 => Self::Negate,
+            0x14 => Self::Print,
+            0x15 => Self::Jump,
+            0x16 => Self::JumpIfFalse,
+            0x17 => Self::Loop,
+            0x18 => Self::Call,
+            0x19 => Self::Return,
+            _ => panic!("Invalid op code value")
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 /// A struct representing a block of code. The chunk contains the instruction [`OpCode`] bytes, the constants, and the lines of each instruction.
 pub struct Chunk {
     code: Vec<u8>,
     constants: Vec<Value>,
-    // TODO Challenge: Implement run line encoding for lines
+    // TODO Challenge: Implement run line encoding for lines and probably use an unsigned integer
     lines: Vec<i32>,
 }
 
@@ -142,7 +123,7 @@ impl Chunk {
 
     /// Write an instruction to the chunk's code.
     /// 
-    /// # Arguments:
+    /// **Arguments:**
     /// - `instruction` - The [`u8`] representation of the instruction.
     /// - `line` - The [`i32`] index of the line in the chunk's lines.
     pub fn write_instruction(&mut self, instruction: u8, line: i32) {
@@ -152,40 +133,19 @@ impl Chunk {
 
     /// Add a constant to the chunk's constants and returns the index.
     /// 
-    /// # Arguments:
+    /// **Arguments:**
     /// - `constant` - The [`Value`] to be added to the chunk's constants.
     /// 
-    /// # Returns:
+    /// **Returns:**
     /// The [`usize`] index of the added constant.
     pub fn write_constant(&mut self, constant: Value) -> usize {
         self.constants.push(constant);
         self.constants.len() - 1
     }
 
-    /// Write the one byte location operand for a [`OpCode::Constant`].
-    /// 
-    /// # Arguments:
-    /// - `location` - The [`u8`] index of a constant in the chunk's constants.
-    /// - `line` - The [`i32`] index of the line in the chunk's lines.
-    pub fn write_constant_location(&mut self, location: u8, line: i32) {
-        self.code.push(location);
-        self.lines.push(line);
-    }
-
-    /// Write the two byte location operand for a [`OpCode::ConstantLong`].
-    /// 
-    /// # Arguments:
-    /// - `location` - The [`u16`] index of a constant in the chunk's constants.
-    /// - `line` - The [`i32`] index of the line in the chunk's lines.
-    pub fn write_long_constant_location(&mut self, location: u16, line: i32) {
-        let bytes = location.to_le_bytes();
-        self.code.extend_from_slice(&bytes);
-        self.lines.push(line);
-    }
-
     /// Write the destination of a jump statement in the given offset position
     /// 
-    /// # Arguments:
+    /// **Arguments:**
     /// - `offset` - The [`usize`] offset to write the value to.
     /// - `value` - The [`u16`] value to write. 
     pub fn write_jump_dest(&mut self, offset: usize, value: u16) {
@@ -234,7 +194,7 @@ impl Display for Chunk {
 
         while let Some(instruction) = iter.next() {
             write!(f, "{:#06X} | ", instruction_counter)?;
-            let op_code: OpCode = instruction.try_into().unwrap();
+            let op_code = instruction.into();
 
             let mut output = String::new();
             output_instruction(&mut output, &mut iter, op_code, self.lines[instruction_counter], &self.constants)?;

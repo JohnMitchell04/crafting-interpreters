@@ -1,14 +1,41 @@
 use std::{fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}};
 
+use crate::chunk::Chunk;
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub struct Function {
+    pub arity: u8,
+    pub chunk: Chunk,
+    pub name: String,
+}
+
+impl Function {
+    pub fn new() -> Self {
+        Function { arity: 0, chunk: Chunk::new(), name: String::new() }
+    }
+}
+
+impl Display for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.name.is_empty() {
+            write!(f, "<script>")
+        } else {
+            write!(f, "<fn({}) {}>", self.arity, self.name)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Object {
-    String(String)
+    String(String),
+    Function(Function),
 }
 
 impl Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::String(s) => write!(f, "\"{}\"", s),
+            Self::Function(fun) => write!(f, "{}", fun),
         }
     }
 }
@@ -26,6 +53,7 @@ impl Value {
     pub fn get_string(&self) -> Result<String, &'static str> {
         match self {
             Self::Obj(Object::String(s)) => Ok(s.clone()),
+            Self::Obj(Object::Function(f)) => Ok(f.name.clone()),
             _ => Err("Value must be a string"),
         }
     }

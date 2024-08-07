@@ -21,7 +21,7 @@ pub enum TokenType {
     Print, Return, Super, This,
     True, Var, While,
 
-    EOF
+    EOF, NULL
 }
 
 impl Display for TokenType {
@@ -66,6 +66,7 @@ impl Display for TokenType {
             Self::Var => write!(f, "TOKEN_VAR"),
             Self::While => write!(f, "TOKEN_WHILE"),
             Self::EOF => write!(f, "TOKEN_EOF"),
+            Self::NULL => write!(f, "TOKEN_NULL"),
         }
     }
 }
@@ -136,7 +137,7 @@ impl<'a> Scanner<'a> {
 
     /// Scan and produce the next token.
     /// 
-    /// # Returns:
+    /// **Returns:**
     /// A [`Token`] if scanning was successful and a [`ParseError`] if there was an issue.
     pub fn scan_token(&mut self) -> Result<Token<'a>, ParseError> {
         let res = self.skip_whitespace();
