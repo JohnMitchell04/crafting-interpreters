@@ -232,6 +232,7 @@ pub fn output_instruction(output: &mut String, iter: &mut dyn Iterator<Item = &u
         OpCode::Jump => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
         OpCode::JumpIfFalse => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
         OpCode::Loop => writeln!(output, " {:#06X}  |", u16::from_le_bytes([*iter.next().unwrap(), *iter.next().unwrap()])),
+        OpCode::Call => writeln!(output, " {:<8}|", format!("{:#04X}", *iter.next().unwrap())),
         _ => writeln!(output, "{}|", " ".repeat(9)),
     }
 }

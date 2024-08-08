@@ -1,5 +1,5 @@
 use std::{collections::HashMap, error::Error, fmt::Display, mem};
-use crate::{chunk::{output_instruction, OpCode}, compiler::{Compiler, FunctionType}, value::{Function, Object, Value}};
+use crate::{chunk::{output_instruction, OpCode}, compiler::{Compiler, FunctionType}, value::{Function, NativeFn, Object, Value}};
 
 macro_rules! binary_op {
     ($line:expr, $stack:expr, $op:tt) => {
@@ -119,6 +119,10 @@ impl CallFrame {
 
 const FRAMES_MAX: usize = 64;
 
+fn test_native(arg_count: u8, args: &[Value]) -> Value {
+    Value::Obj(Object::String(String::from("Test function")))
+}
+
 pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
@@ -126,11 +130,15 @@ pub struct VM {
     frames: Vec<CallFrame>,
 }
 
+// TODO: There are a lot of clones creating duplicate values, ideally these should be cleaned up
 impl VM {
     pub fn new() -> Self {
+        let mut globals = HashMap::new();
+        globals.insert("test".to_string(), Value::Obj(Object::NativeFunction(test_native))); 
+
         VM { 
             stack: Vec::with_capacity(FRAMES_MAX * u16::MAX as usize),
-            globals: HashMap::new(),
+            globals,
             operation_counter: 0,
             frames: Vec::with_capacity(FRAMES_MAX)
         }
@@ -249,12 +257,7 @@ impl VM {
                     *frame.get_ip_mut() -= offset as usize;
                 },
                 OpCode::Call => {
-                    let arg_count = frame.next().unwrap();
-                    if let Value::Obj(Object::Function(func)) = self.stack[self.stack.len() - 1 - arg_count as usize].clone() {
-                        self.call(func, arg_count)?;
-                    } else {
-                        runtime_error!(frame.get_lines()[self.operation_counter], self.stack; "Can only call functions and classes");
-                    }
+                    self.call_value();
                 },
                 OpCode::Return => {
                     let res = self.stack.pop().unwrap();
@@ -277,6 +280,27 @@ impl VM {
         }
     }
 
+    fn call_value(&mut self) -> Result<(), InterpretError> {
+        let frame = self.frames.last_mut().unwrap();
+        let arg_count = frame.next().unwrap();
+        let lines = frame.get_lines();
+
+        match self.stack[self.stack.len() - 1 - arg_count as usize].clone() {
+            Value::Obj(Object::Function(func)) => self.call(func, arg_count),
+            Value::Obj(Object::NativeFunction(fun)) => {
+                let res = fun(arg_count, &self.stack[(self.stack.len() - arg_count as usize)..self.stack.len()]);
+
+                for _ in 0..arg_count + 1 {
+                    self.stack.pop();
+                }
+
+                self.stack.push(res);
+                Ok(())
+            },
+            _ => runtime_error!(lines[self.operation_counter], self.stack; "Can only call functions and classes"),
+        }
+    }
+
     fn call(&mut self, function: Function, arg_count: u8) -> Result<(), InterpretError> {
         if function.arity != arg_count {
             runtime_error!(self.frames.last().unwrap().get_lines()[self.operation_counter], self.stack; "Expected {} args but got {}", function.arity, arg_count)
@@ -288,6 +312,14 @@ impl VM {
 
         self.frames.push(CallFrame { function, ip: 0, slot_start: self.stack.len() - 1 - arg_count as usize });
         Ok(())
+    }
+
+    fn define_native(&mut self, name: &str, function: NativeFn) {
+        self.stack.push(Value::Obj(Object::String(name.to_string())));
+        self.stack.push(Value::Obj(Object::NativeFunction(function)));
+        self.globals.insert(name.to_string(), self.stack.last().unwrap().clone());
+        self.stack.pop();
+        self.stack.pop();
     }
 
     #[cfg(debug_assertions)]

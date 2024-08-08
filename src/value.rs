@@ -2,6 +2,8 @@ use std::{fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}};
 
 use crate::chunk::Chunk;
 
+pub type NativeFn = fn(arg_count: u8, args: &[Value]) -> Value;
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Function {
     pub arity: u8,
@@ -29,6 +31,7 @@ impl Display for Function {
 pub enum Object {
     String(String),
     Function(Function),
+    NativeFunction(NativeFn),
 }
 
 impl Display for Object {
@@ -36,6 +39,7 @@ impl Display for Object {
         match self {
             Self::String(s) => write!(f, "\"{}\"", s),
             Self::Function(fun) => write!(f, "{}", fun),
+            Self::NativeFunction(_) => write!(f, "<native fn>")
         }
     }
 }
