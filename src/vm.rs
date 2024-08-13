@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt::Display, mem};
+use std::{collections::HashMap, error::Error, fmt::Display, mem, rc::Rc};
 use crate::{chunk::{output_instruction, OpCode}, compiler::{Compiler, FunctionType}, value::{Function, NativeFn, Object, Value}};
 
 macro_rules! binary_op {
@@ -67,30 +67,29 @@ impl Display for InterpretError {
 
 impl Error for InterpretError {}
 
+/// Maximum number of call frames the VM can have.
+const FRAMES_MAX: usize = 64;
+
 #[derive(Debug, Clone)]
+/// A call frame that the VM uses to execute code.
 struct CallFrame {
-    pub function: Function,
-    pub ip: usize,
-    pub slot_start: usize,
+    function: Rc<Function>,
+    ip: usize,
+    slot_start: usize,
 }
 
 impl CallFrame {
-    pub fn get_ip(&self) -> usize {
-        self.ip
-    }
-
-    pub fn get_ip_mut(&mut self) -> &mut usize {
-        &mut self.ip
-    }
-
+    /// Get a slice containing the function's constants.
     pub fn get_constants(&self) -> &[Value] {
         self.function.chunk.get_constants()
     }
 
+    /// Get a slice containing the function's constants.
     pub fn get_lines(&self) -> &[i32] {
         self.function.chunk.get_lines()
     }
 
+    /// Retrieve the next op code.
     pub fn next(&mut self) -> Option<u8> {
         if self.ip >= self.function.chunk.get_code_count() {
             None
@@ -100,29 +99,27 @@ impl CallFrame {
         }
     }
 
-    // TODO: Clean this function up
     #[cfg(debug_assertions)]
-    pub fn debug_info(&self, op_code: OpCode, line_counter: usize) {
+    /// Print debug information about the frame's state
+    pub fn debug_info(&self, line_counter: usize) {
         println!("DEBUG: Current instruction: ");
+
+        let op_code = (&self.function.chunk.get_code()[self.ip - 1]).into();
         let mut output = String::new();
-        output_instruction(
-            &mut output,
-            &mut self.function.chunk.get_code_iter().skip(self.ip),
-            op_code, 
-            self.get_lines()[line_counter], 
-            self.get_constants()
-        ).unwrap();
+        let mut iter = self.function.chunk.get_code_iter().skip(self.ip);
+        output_instruction(&mut output, &mut iter, op_code, self.get_lines()[line_counter], self.get_constants()).unwrap();
+        
         print!("{}", output);
         println!("{}", "-".repeat(50));
     }
 }
 
-const FRAMES_MAX: usize = 64;
-
+/// Temporary native test function that just puts "Test Function" on the stack for now.
 fn test_native(arg_count: u8, args: &[Value]) -> Value {
     Value::Obj(Object::String(String::from("Test function")))
 }
 
+/// A VM object that compiles and executes code.
 pub struct VM {
     stack: Vec<Value>,
     globals: HashMap<String, Value>,
@@ -130,7 +127,6 @@ pub struct VM {
     frames: Vec<CallFrame>,
 }
 
-// TODO: There are a lot of clones creating duplicate values, ideally these should be cleaned up
 impl VM {
     pub fn new() -> Self {
         let mut globals = HashMap::new();
@@ -144,14 +140,21 @@ impl VM {
         }
     }
 
+    /// Interpret the given source code, this function will compile and execute the code.
+    /// 
+    /// **Arguments:**
+    /// - `source` - The provided source code.
+    /// 
+    /// **Returns:**
     pub fn interpret(&mut self, source: String) -> Result<(), InterpretError> {
+        // Compile provided source code
         let compiler = Compiler::new(FunctionType::Script, &source);
         let function = compiler.compile().map_err(|_| InterpretError::InterpretCompileError)?;
-        
-        // TODO: this probably shouldn't be a clone
-        let frame = CallFrame { function: function.clone(), ip: 0, slot_start: self.stack.len() };
-        self.frames.push(frame.clone());
-        self.stack.push(Value::Obj(Object::Function(function)));
+
+        // Place the anonymous function that encloses the source code onto the VM        
+        let fn_ref = Rc::new(function);
+        self.frames.push(CallFrame { function: fn_ref.clone(), ip: 0, slot_start: self.stack.len() });
+        self.stack.push(Value::Obj(Object::Function(fn_ref)));
 
         self.run()?;
         Ok(())
@@ -169,11 +172,7 @@ impl VM {
             };
 
             #[cfg(debug_assertions)]
-            {
-                self.debug_info();
-                let frame = self.frames.last_mut().unwrap();
-                frame.debug_info(op_code, self.operation_counter);
-            }
+            self.debug_info();
 
             let frame = self.frames.last_mut().unwrap();
             match op_code {
@@ -187,6 +186,8 @@ impl VM {
                     let value = frame.get_constants()[loc].clone();
                     self.stack.push(value)
                 },
+                OpCode::Nil => self.stack.push(Value::Nil),
+                OpCode::True => self.stack.push(Value::Bool(true)),
                 OpCode::False => self.stack.push(Value::Bool(false)),
                 OpCode::Pop => _ = self.stack.pop(),
                 OpCode::GetGlobal => {
@@ -224,8 +225,6 @@ impl VM {
                 OpCode::Equal => binary_comp!(lines[self.counter], self.stack, ==),
                 OpCode::Greater => binary_comp!(lines[self.counter], self.stack, >),
                 OpCode::Less => binary_comp!(lines[self.counter], self.stack, <),
-                OpCode::True => self.stack.push(Value::Bool(true)),
-                OpCode::Nil => self.stack.push(Value::Nil),
                 OpCode::Add => binary_op!(frame.get_lines()[self.operation_counter], self.stack, +),
                 OpCode::Subtract => binary_op!(frame.get_lines()[self.operation_counter], self.stack, -),
                 OpCode::Multipliy => binary_op!(frame.get_lines()[self.operation_counter], self.stack, *),
@@ -246,19 +245,17 @@ impl VM {
                 OpCode::Print => println!("{}", self.stack.pop().unwrap()),
                 OpCode::Jump => {
                     let offset = u16::from_le_bytes([frame.next().unwrap(), frame.next().unwrap()]);
-                    *frame.get_ip_mut() += offset as usize;
+                    frame.ip += offset as usize;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = u16::from_le_bytes([frame.next().unwrap(), frame.next().unwrap()]);
-                    if is_falsey!(self.stack.last().unwrap()) { *frame.get_ip_mut() += offset as usize}
+                    if is_falsey!(self.stack.last().unwrap()) { frame.ip += offset as usize }
                 },
                 OpCode::Loop => {
                     let offset = u16::from_le_bytes([frame.next().unwrap(), frame.next().unwrap()]);
-                    *frame.get_ip_mut() -= offset as usize;
+                    frame.ip -= offset as usize;
                 },
-                OpCode::Call => {
-                    self.call_value();
-                },
+                OpCode::Call => self.call_value()?,
                 OpCode::Return => {
                     let res = self.stack.pop().unwrap();
                     let index = self.frames.pop().unwrap().slot_start;
@@ -280,28 +277,31 @@ impl VM {
         }
     }
 
+    /// Call a function on the stack.
+    /// 
+    /// **Returns:**
+    /// An [`InterpretError`] if the call is invalid, nothing otherwise.
     fn call_value(&mut self) -> Result<(), InterpretError> {
         let frame = self.frames.last_mut().unwrap();
         let arg_count = frame.next().unwrap();
-        let lines = frame.get_lines();
 
-        match self.stack[self.stack.len() - 1 - arg_count as usize].clone() {
-            Value::Obj(Object::Function(func)) => self.call(func, arg_count),
-            Value::Obj(Object::NativeFunction(fun)) => {
-                let res = fun(arg_count, &self.stack[(self.stack.len() - arg_count as usize)..self.stack.len()]);
-
-                for _ in 0..arg_count + 1 {
-                    self.stack.pop();
-                }
-
-                self.stack.push(res);
-                Ok(())
-            },
-            _ => runtime_error!(lines[self.operation_counter], self.stack; "Can only call functions and classes"),
+        match &self.stack[self.stack.len() - 1 - arg_count as usize] {
+            Value::Obj(Object::Function(func)) => self.call(func.clone(), arg_count),
+            Value::Obj(Object::NativeFunction(func)) => Ok(self.call_native(*func, arg_count)),
+            _ => runtime_error!(frame.get_lines()[self.operation_counter], self.stack; "Can only call functions and classes"),
         }
     }
 
-    fn call(&mut self, function: Function, arg_count: u8) -> Result<(), InterpretError> {
+    /// Call a function by placing a new [`CallFrame`] containing the provided function on the VM's frames.
+    /// This function ensures the user has provided the correct number of arguments and a stack overflow will not occur.
+    /// 
+    /// **Arguments:**
+    /// - `function` - The [`Function`] to call.
+    /// - `arg_count` - The number of arguments povided by the user.
+    /// 
+    /// **Returns:**
+    /// An [`InterpretError`] if the call is invalid, nothing otherwise.
+    fn call(&mut self, function: Rc<Function>, arg_count: u8) -> Result<(), InterpretError> {
         if function.arity != arg_count {
             runtime_error!(self.frames.last().unwrap().get_lines()[self.operation_counter], self.stack; "Expected {} args but got {}", function.arity, arg_count)
         }
@@ -314,15 +314,23 @@ impl VM {
         Ok(())
     }
 
-    fn define_native(&mut self, name: &str, function: NativeFn) {
-        self.stack.push(Value::Obj(Object::String(name.to_string())));
-        self.stack.push(Value::Obj(Object::NativeFunction(function)));
-        self.globals.insert(name.to_string(), self.stack.last().unwrap().clone());
-        self.stack.pop();
-        self.stack.pop();
+    /// Call a native function with the given arguments, the result is computed natively in Rust and returned to the user on the stack.
+    /// 
+    /// **Arguments:**
+    /// - `function` - The [`NativeFn`] to call.
+    /// - `arg_count` - The number of arguments povided by the user.
+    fn call_native(&mut self, function: NativeFn, arg_count: u8) {
+        let res = function(arg_count, &self.stack[(self.stack.len() - arg_count as usize - 1)..self.stack.len()]);
+
+        for _ in 0..arg_count + 1 {
+            self.stack.pop();
+        }
+
+        self.stack.push(res);
     }
 
     #[cfg(debug_assertions)]
+    /// Print debug information about the current VM state.
     fn debug_info(&self) {
         let mut some = false;
         println!("DEBUG: Globals:");
@@ -341,5 +349,9 @@ impl VM {
         }
 
         if !some { println!("NONE"); }
+
+        // Debug the current instruction
+        let frame = self.frames.last().unwrap();
+        frame.debug_info(self.operation_counter);
     }
 }

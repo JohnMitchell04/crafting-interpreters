@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, rc::Rc};
 use crate::{chunk::OpCode, scanner::{Scanner, Token, TokenType}, value::{Function, Object, Value}};
 
 /// Write a number of bytes to the chunk's code.
@@ -163,7 +163,7 @@ struct Local<'a> {
     depth: i16,
 }
 
-/// A compiler object that costructs a chunk by reading tokens from the input.
+/// A compiler object that constructs a chunk by reading tokens from the input.
 pub struct Compiler<'a> {
     function: Function,
     function_type: FunctionType,
@@ -463,7 +463,7 @@ impl<'a> Compiler<'a> {
         self.block();
 
         self.end_scope();
-        let val = Value::Obj(Object::Function(self.function.clone()));
+        let val = Value::Obj(Object::Function(Rc::new(self.function.clone())));
         self.function = enclosing;
         self.emit_constant(val);
     }

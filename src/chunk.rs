@@ -178,10 +178,6 @@ impl Chunk {
     pub fn get_lines(&self) -> &[i32] {
         &self.lines
     }
-
-    pub fn clear_code(&mut self) {
-        self.code.clear()
-    }
 }
 
 /// Display each instruction in the chunk.

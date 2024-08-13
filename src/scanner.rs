@@ -87,22 +87,11 @@ impl<'a> Display for Token<'a> {
 
 impl<'a> Token<'a> {
     pub fn new(source: &'a str) -> Self {
-        Token { token_type: TokenType::EOF, data: source, line: 0 }
+        Token { token_type: TokenType::NULL, data: source, line: 0 }
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ParseErrorType {
-    UnexpectedToken,
-    UnterminatedString
-}
-
-impl Display for ParseErrorType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnexpectedToken => write!(f, "Unexpected character"),
-            Self::UnterminatedString => write!(f, "Unterminated string"),
-        }
+    pub fn new_specified(token_type: TokenType, data: &'a str, line: usize) -> Self {
+        Token { token_type, data, line }
     }
 }
 
@@ -110,12 +99,12 @@ impl Display for ParseErrorType {
 pub struct ParseError {
     line: usize,
     col: usize,
-    error_type: ParseErrorType,
+    message: &'static str,
 }
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error: {} on line {} at column {}", self.error_type, self.line, self.col)
+        write!(f, "Error: {} on line {} at column {}", self.message, self.line, self.col)
     }
 }
 
@@ -132,7 +121,7 @@ pub struct Scanner<'a> {
 impl<'a> Scanner<'a> {
     /// Create a new scanner with the given source.
     pub fn new(source: &'a str) -> Self {
-        Scanner { line: 1, col: 0, current: 0, source, iter: source.char_indices().peekable() }
+        Scanner { line: 1, col: 1, current: 0, source, iter: source.char_indices().peekable() }
     }
 
     /// Scan and produce the next token.
@@ -141,58 +130,54 @@ impl<'a> Scanner<'a> {
     /// A [`Token`] if scanning was successful and a [`ParseError`] if there was an issue.
     pub fn scan_token(&mut self) -> Result<Token<'a>, ParseError> {
         let res = self.skip_whitespace();
-        self.col += 1;
 
-        if res.is_none() {
-            return Ok(self.make_token(TokenType::EOF, ""))
-        }
-
+        if res.is_none() { return Ok(Token::new_specified(TokenType::EOF, "", self.line)) }
         let res = res.unwrap();
 
         let token_type = match res {
-            (_, "(") => self.make_token(TokenType::LeftParen, res.1),
-            (_, ")") => self.make_token(TokenType::RightParen, res.1),
-            (_, "{") => self.make_token(TokenType::LeftBrace, res.1),
-            (_, "}") => self.make_token(TokenType::RightBrace, res.1),
-            (_, ";") => self.make_token(TokenType::Semicolon, res.1),
-            (_, ",") => self.make_token(TokenType::Comma, res.1),
-            (_, ".") => self.make_token(TokenType::Dot, res.1),
-            (_, "-") => self.make_token(TokenType::Minus, res.1),
-            (_, "+") => self.make_token(TokenType::Plus, res.1),
-            (_, "/") => self.make_token(TokenType::Slash, res.1),
-            (_, "*") => self.make_token(TokenType::Star, res.1),
+            (_, "(") => Token::new_specified(TokenType::LeftParen, res.1, self.line),
+            (_, ")") => Token::new_specified(TokenType::RightParen, res.1, self.line),
+            (_, "{") => Token::new_specified(TokenType::LeftBrace, res.1, self.line),
+            (_, "}") => Token::new_specified(TokenType::RightBrace, res.1, self.line),
+            (_, ";") => Token::new_specified(TokenType::Semicolon, res.1, self.line),
+            (_, ",") => Token::new_specified(TokenType::Comma, res.1, self.line),
+            (_, ".") => Token::new_specified(TokenType::Dot, res.1, self.line),
+            (_, "-") => Token::new_specified(TokenType::Minus, res.1, self.line),
+            (_, "+") => Token::new_specified(TokenType::Plus, res.1, self.line),
+            (_, "/") => Token::new_specified(TokenType::Slash, res.1, self.line),
+            (_, "*") => Token::new_specified(TokenType::Star, res.1, self.line),
             (index, "!") => {
                 if self.match_next('=') {
-                    self.make_token(TokenType::BangEqual, &self.source[index..self.current])
+                    Token::new_specified(TokenType::BangEqual, &self.source[index..self.current], self.line)
                 } else {
-                    self.make_token(TokenType::Bang, res.1)
+                    Token::new_specified(TokenType::Bang, res.1, self.line)
                 } 
             },
             (index, "=") => {
                 if self.match_next('=') {
-                    self.make_token(TokenType::EqualEqual, &self.source[index..self.current])
+                    Token::new_specified(TokenType::EqualEqual, &self.source[index..self.current], self.line)
                 } else {
-                    self.make_token(TokenType::Equal, res.1)
+                    Token::new_specified(TokenType::Equal, res.1, self.line)
                 } 
             },
             (index, "<") => {
                 if self.match_next('=') {
-                    self.make_token(TokenType::LessEqual, &self.source[index..self.current])
+                    Token::new_specified(TokenType::LessEqual, &self.source[index..self.current], self.line)
                 } else {
-                    self.make_token(TokenType::Less, res.1)
+                    Token::new_specified(TokenType::Less, res.1, self.line)
                 } 
             },
             (index, ">") => {
                 if self.match_next('=') {
-                    self.make_token(TokenType::GreaterEqual, &self.source[index..self.current])
+                    Token::new_specified(TokenType::GreaterEqual, &self.source[index..self.current], self.line)
                 } else {
-                    self.make_token(TokenType::Greater, res.1)
+                    Token::new_specified(TokenType::Greater, res.1, self.line)
                 } 
             },
             (_, "\"") => return self.string(),
             (index, c) if c.chars().all(|c| c.is_alphabetic()) => self.identifier(index),
             (index, c) if c.chars().all(|c| c.is_ascii_digit()) => self.number(index),
-            _ => return Err(self.make_error(ParseErrorType::UnexpectedToken)),
+            _ => return Err(self.make_error("Unexpected Token")),
         };
 
         Ok(token_type)
@@ -210,13 +195,13 @@ impl<'a> Scanner<'a> {
                 '"' => { 
                     self.current = self.next_index();
                     self.col += 1;
-                    return Ok(self.make_token(TokenType::String, &self.source[start..index]))
+                    return Ok(Token::new_specified(TokenType::String, &self.source[start..index], self.line))
                 },
                 _ => { self.col += 1 },
             }
         }
 
-        Err(self.make_error(ParseErrorType::UnterminatedString))
+        Err(self.make_error("Unterminated String"))
     }
 
     /// Create a new number token, taking care of decimal points correctly.
@@ -239,7 +224,7 @@ impl<'a> Scanner<'a> {
         }
         
         let end = self.next_index();
-        self.make_token(TokenType::Number, &self.source[start..end])
+        Token::new_specified(TokenType::Number, &self.source[start..end], self.line)
     }
 
     /// Creates a new identifier token, checking whether the identifier is a key word first.
@@ -253,24 +238,24 @@ impl<'a> Scanner<'a> {
         let end = self.next_index();
         let ident = &self.source[start..end];
 
-        match &self.source[start..end] {
-            "and" =>    self.make_token(TokenType::And,         ident),
-            "class" =>  self.make_token(TokenType::Class,       ident),
-            "else" =>   self.make_token(TokenType::Else,        ident),
-            "if" =>     self.make_token(TokenType::If,          ident),
-            "nil" =>    self.make_token(TokenType::Nil,         ident),
-            "or" =>     self.make_token(TokenType::Or,          ident),
-            "print" =>  self.make_token(TokenType::Print,       ident),
-            "return" => self.make_token(TokenType::Return,      ident),
-            "super" =>  self.make_token(TokenType::Super,       ident),
-            "var" =>    self.make_token(TokenType::Var,         ident),
-            "while" =>  self.make_token(TokenType::While,       ident),
-            "false" =>  self.make_token(TokenType::False,       ident),
-            "for" =>    self.make_token(TokenType::For,         ident),
-            "fun" =>    self.make_token(TokenType::Fun,         ident),
-            "this" =>   self.make_token(TokenType::This,        ident),
-            "true" =>   self.make_token(TokenType::True,        ident),
-            _ =>        self.make_token(TokenType::Identifier,  ident),
+        match ident {
+            "and" =>    Token::new_specified(TokenType::And,         ident, self.line),
+            "class" =>  Token::new_specified(TokenType::Class,       ident, self.line),
+            "else" =>   Token::new_specified(TokenType::Else,        ident, self.line),
+            "if" =>     Token::new_specified(TokenType::If,          ident, self.line),
+            "nil" =>    Token::new_specified(TokenType::Nil,         ident, self.line),
+            "or" =>     Token::new_specified(TokenType::Or,          ident, self.line),
+            "print" =>  Token::new_specified(TokenType::Print,       ident, self.line),
+            "return" => Token::new_specified(TokenType::Return,      ident, self.line),
+            "super" =>  Token::new_specified(TokenType::Super,       ident, self.line),
+            "var" =>    Token::new_specified(TokenType::Var,         ident, self.line),
+            "while" =>  Token::new_specified(TokenType::While,       ident, self.line),
+            "false" =>  Token::new_specified(TokenType::False,       ident, self.line),
+            "for" =>    Token::new_specified(TokenType::For,         ident, self.line),
+            "fun" =>    Token::new_specified(TokenType::Fun,         ident, self.line),
+            "this" =>   Token::new_specified(TokenType::This,        ident, self.line),
+            "true" =>   Token::new_specified(TokenType::True,        ident, self.line),
+            _ =>        Token::new_specified(TokenType::Identifier,  ident, self.line),
         }
     }
 
@@ -287,13 +272,14 @@ impl<'a> Scanner<'a> {
     /// Get the next character, if it is whitespace or a comment then skip it, otherwise return it.
     fn skip_whitespace(&mut self) -> Option<(usize, &'a str)> {
         while let Some((index, c)) = self.iter.next() {
+            self.col += 1;
             match c {
                 '\n' => {
                     self.line += 1;
-                    self.col = 0
+                    self.col = 1
                 },
                 '/' => if let Some((index, str)) = self.skip_comment(index) { return Some((index, str)) },
-                c if c.is_whitespace() => {},
+                c if c.is_whitespace() => (),
                 _ => {
                     self.current = self.next_index();
                     return Some((index, self.next_str(index)))
@@ -311,7 +297,7 @@ impl<'a> Scanner<'a> {
                 if *c != '\n' { break }
                 self.iter.next();
             }
-        } else { 
+        } else {
             self.current = self.next_index();
             return Some((index, self.next_str(index)))
         }
@@ -319,7 +305,7 @@ impl<'a> Scanner<'a> {
         None
     }
 
-    /// If the next character macthes then advance and return it, otherwise return none.
+    /// If the next character matches then advance and return true, otherwise return false.
     fn match_next(&mut self, check: char) -> bool {
         if let Some((_, c)) = self.iter.peek() {
             if *c == check {
@@ -333,13 +319,8 @@ impl<'a> Scanner<'a> {
         false
     }
 
-    /// Create a new token with the given information.
-    fn make_token(&self, token_type: TokenType, data: &'a str) -> Token<'a> {
-        Token { token_type, data, line: self.line }
-    }
-
     /// Create a new parse error based on the state of the scanner.
-    fn make_error(&self, error_type: ParseErrorType) -> ParseError {
-        ParseError { line: self.line, col: self.col, error_type }
+    fn make_error(&self, message: &'static str) -> ParseError {
+        ParseError { line: self.line, col: self.col, message }
     }
 }

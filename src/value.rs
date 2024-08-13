@@ -1,4 +1,4 @@
-use std::{fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}};
+use std::{fmt::{Debug, Display}, ops::{Add, Div, Mul, Neg, Sub}, rc::Rc};
 
 use crate::chunk::Chunk;
 
@@ -30,7 +30,7 @@ impl Display for Function {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Object {
     String(String),
-    Function(Function),
+    Function(Rc<Function>),
     NativeFunction(NativeFn),
 }
 
