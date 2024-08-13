@@ -224,19 +224,15 @@ impl<'a> Compiler<'a> {
     fn advance(&mut self) {
         self.previous = self.current;
 
-        loop {
-            let res = self.scanner.scan_token();
+        let res = self.scanner.scan_token();
 
-            if res.is_ok() {
-                self.current = res.unwrap();
-                #[cfg(debug_assertions)]
-                println!("DEBUG: {}", self.current);
-                break;
-            } else {
-                print!("{}", res.err().unwrap());
-                self.had_error = true;
-                break;
-            }
+        if res.is_ok() {
+            self.current = res.unwrap();
+            #[cfg(debug_assertions)]
+            println!("DEBUG: {}", self.current);
+        } else {
+            print!("{}", res.err().unwrap());
+            self.had_error = true;
         }
     }
 

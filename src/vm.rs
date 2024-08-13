@@ -259,7 +259,7 @@ impl VM {
                 OpCode::Return => {
                     let res = self.stack.pop().unwrap();
                     let index = self.frames.pop().unwrap().slot_start;
-                    if self.frames.len() == 0 {
+                    if self.frames.is_empty() {
                         self.frames.pop();
                         return Ok(())
                     }

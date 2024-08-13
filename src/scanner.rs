@@ -294,7 +294,7 @@ impl<'a> Scanner<'a> {
     fn skip_comment(&mut self, index: usize) -> Option<(usize, &'a str)> {
         if let Some((_, '/')) = self.iter.peek() {
             while let Some((_, c)) = self.iter.peek() {
-                if *c != '\n' { break }
+                if *c == '\n' { break }
                 self.iter.next();
             }
         } else {
